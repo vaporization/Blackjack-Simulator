@@ -105,121 +105,132 @@ export class Game {
     this.emit("clearLog");
   }
 
-  // ---------- Round flow ----------
-  startRound(betAmount) {
-    this.applySettings(this.getSettings());
+// ---------- Round flow ----------
+startRound(betAmount) {
+  this.applySettings(this.getSettings());
 
-    // Reshuffle before starting if cut reached or shoe empty
-    if (this.shoe.shouldReshuffleBeforeNextRound()) {
-      this.shoe.reshuffle({ reseed: false });
-      this.emit("log", { msg: `Cut card reached — reshuffling before next round.` });
-    }
+  // ✅ NEW: Clear previous round table state BEFORE anything else
+  // (keeps bankroll + shoe, does NOT clear the log)
+  this.phase = "betting";
+  this.dealer.cards = [];
+  this.dealer.holeHidden = true;
+  this.playerHands = [];
+  this.activeHandIndex = 0;
+  this.round = {
+    baseBet: 0,
+    insuranceOffered: false,
+    insuranceTaken: false,
+    insuranceBet: 0,
+    dealerPeeked: false,
+    dealerHasBlackjack: false,
+    cutReachedAtStart: this.shoe.cutReached,
+    canStartNewRound: !this.shoe.shouldReshuffleBeforeNextRound(),
+    splitCount: 0,
+    logCleared: true
+  };
+  // Optional: immediately reflect cleared table in UI
+  this.emit("state");
 
-    const bet = clamp(Number(betAmount || 0), this.settings.minBet, this.settings.maxBet);
+  // Reshuffle before starting if cut reached or shoe empty
+  if (this.shoe.shouldReshuffleBeforeNextRound()) {
+    this.shoe.reshuffle({ reseed: false });
+    this.emit("log", { msg: `Cut card reached — reshuffling before next round.` });
+  }
 
-    if (!Number.isFinite(bet) || bet <= 0) {
-      this.emit("log", { msg: `Invalid bet.` });
-      return;
-    }
-    if (bet < this.settings.minBet || bet > this.settings.maxBet) {
-      this.emit("log", { msg: `Bet must be between $${this.settings.minBet} and $${this.settings.maxBet}.` });
-      return;
-    }
-    if (this.bankroll < bet) {
-      this.emit("log", { msg: `Insufficient bankroll for $${bet}.` });
-      return;
-    }
+  const bet = clamp(Number(betAmount || 0), this.settings.minBet, this.settings.maxBet);
 
-    this.roundNo += 1;
-    this.phase = "initial_deal";
-    this.round.baseBet = bet;
+  if (!Number.isFinite(bet) || bet <= 0) {
+    this.emit("log", { msg: `Invalid bet.` });
+    return;
+  }
+  if (bet < this.settings.minBet || bet > this.settings.maxBet) {
+    this.emit("log", { msg: `Bet must be between $${this.settings.minBet} and $${this.settings.maxBet}.` });
+    return;
+  }
+  if (this.bankroll < bet) {
+    this.emit("log", { msg: `Insufficient bankroll for $${bet}.` });
+    return;
+  }
 
-    // Take the base bet off bankroll (on table)
-    this.bankroll -= bet;
+  this.roundNo += 1;
+  this.phase = "initial_deal";
+  this.round.baseBet = bet;
 
-    // Create initial player hand
-    this.playerHands = [{
-      id: 1,
-      cards: [],
-      bet,
-      baseBet: bet,
-      isDoubled: false,
-      isSplitAce: false,
-      isFromSplit: false,
-      blackjackEligible: true,
-      done: false,
-      outcome: null
-    }];
-    this.activeHandIndex = 0;
+  // Take the base bet off bankroll (on table)
+  this.bankroll -= bet;
 
-    // Deal sequence: P up, D up, P up, D hole
-    const p1 = this.shoe.draw();
-    const d1 = this.shoe.draw();
-    const p2 = this.shoe.draw();
-    const d2 = this.shoe.draw();
+  // Create initial player hand
+  this.playerHands = [{
+    id: 1,
+    cards: [],
+    bet,
+    baseBet: bet,
+    isDoubled: false,
+    isSplitAce: false,
+    isFromSplit: false,
+    blackjackEligible: true,
+    done: false,
+    outcome: null
+  }];
+  this.activeHandIndex = 0;
 
-    this.playerHands[0].cards.push(p1, p2);
-    this.dealer.cards.push(d1, d2);
-    this.dealer.holeHidden = true;
+  // Deal sequence: P up, D up, P up, D hole
+  const p1 = this.shoe.draw();
+  const d1 = this.shoe.draw();
+  const p2 = this.shoe.draw();
+  const d2 = this.shoe.draw();
 
-    this.emit("log", { msg: `Round ${this.roundNo}: Player bet $${bet}. Dealing...` });
-    this.emit("log", { msg: `Player receives ${p1.rank}${p1.suit}, ${p2.rank}${p2.suit}. Dealer shows ${d1.rank}${d1.suit}.` });
+  this.playerHands[0].cards.push(p1, p2);
+  this.dealer.cards.push(d1, d2);
+  this.dealer.holeHidden = true;
 
-    // Dealer peek rules: ONLY if upcard is Ace or ten-value
-    const upcard = this.dealer.cards[0];
-    const peekAllowed = (upcard.rank === "A" || isTenValue(upcard));
+  this.emit("log", { msg: `Round ${this.roundNo}: Player bet $${bet}. Dealing...` });
+  this.emit("log", { msg: `Player receives ${p1.rank}${p1.suit}, ${p2.rank}${p2.suit}. Dealer shows ${d1.rank}${d1.suit}.` });
 
-    if (peekAllowed) {
-      this.round.dealerPeeked = true;
-      const dealerBJ = isBlackjack(this.dealer.cards, { blackjackEligible: true });
-      this.round.dealerHasBlackjack = dealerBJ;
+  // Dealer peek rules: ONLY if upcard is Ace or ten-value
+  const upcard = this.dealer.cards[0];
+  const peekAllowed = (upcard.rank === "A" || isTenValue(upcard));
 
-      if (dealerBJ) {
-        // If upcard Ace, insurance offered before peek in some casinos;
-        // but per prompt: insurance offered only when upcard Ace; dealer peek confirms blackjack.
-        // Our flow:
-        // - If Ace upcard: offer insurance immediately after deal, user may take, then we resolve peek.
-        // To preserve that, we branch:
-        if (upcard.rank === "A") {
-          this.phase = "insurance";
-          this.round.insuranceOffered = true;
-          this.emit("log", { msg: `Dealer upcard is Ace. Insurance offered (max half bet).` });
-          // We must wait for user insurance choice; after choice, we will resolve peek/bj.
-        } else {
-          // Ten-value upcard, no insurance option; reveal immediately and resolve.
-          this.dealer.holeHidden = false;
-          this.emit("log", { msg: `Dealer peeks (10-value upcard) and has Blackjack.` });
-          this._resolveDealerBlackjackImmediate();
-        }
+  if (peekAllowed) {
+    this.round.dealerPeeked = true;
+    const dealerBJ = isBlackjack(this.dealer.cards, { blackjackEligible: true });
+    this.round.dealerHasBlackjack = dealerBJ;
+
+    if (dealerBJ) {
+      if (upcard.rank === "A") {
+        this.phase = "insurance";
+        this.round.insuranceOffered = true;
+        this.emit("log", { msg: `Dealer upcard is Ace. Insurance offered (max half bet).` });
       } else {
-        // No dealer BJ. If Ace upcard => offer insurance; if 10 upcard => proceed.
-        if (upcard.rank === "A") {
-          this.phase = "insurance";
-          this.round.insuranceOffered = true;
-          this.emit("log", { msg: `Dealer upcard is Ace. Insurance offered (max half bet).` });
-        } else {
-          this.phase = "player";
-          this.emit("log", { msg: `Dealer peeks (10-value upcard): no Blackjack. Player acts.` });
-          this._maybeAutoPlayTick();
-        }
+        this.dealer.holeHidden = false;
+        this.emit("log", { msg: `Dealer peeks (10-value upcard) and has Blackjack.` });
+        this._resolveDealerBlackjackImmediate();
       }
     } else {
-      // No peek
-      this.round.dealerPeeked = false;
-      this.phase = "player";
-      this.emit("log", { msg: `Dealer does not peek (upcard not Ace/10). Player acts.` });
-      this._maybeAutoPlayTick();
+      if (upcard.rank === "A") {
+        this.phase = "insurance";
+        this.round.insuranceOffered = true;
+        this.emit("log", { msg: `Dealer upcard is Ace. Insurance offered (max half bet).` });
+      } else {
+        this.phase = "player";
+        this.emit("log", { msg: `Dealer peeks (10-value upcard): no Blackjack. Player acts.` });
+        this._maybeAutoPlayTick();
+      }
     }
-
-    // Player natural blackjack check happens later in settlement rules,
-    // but we can note it in log now
-    const playerBJ = isBlackjack(this.playerHands[0].cards, { blackjackEligible: true });
-    if (playerBJ) {
-      this.emit("log", { msg: `Player has Blackjack (natural).` });
-    }
-
-    this.emit("state");
+  } else {
+    this.round.dealerPeeked = false;
+    this.phase = "player";
+    this.emit("log", { msg: `Dealer does not peek (upcard not Ace/10). Player acts.` });
+    this._maybeAutoPlayTick();
   }
+
+  const playerBJ = isBlackjack(this.playerHands[0].cards, { blackjackEligible: true });
+  if (playerBJ) {
+    this.emit("log", { msg: `Player has Blackjack (natural).` });
+  }
+
+  this.emit("state");
+}
 
   takeInsurance() {
     if (this.phase !== "insurance" || !this.round.insuranceOffered) return;
