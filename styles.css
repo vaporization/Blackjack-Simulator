@@ -328,20 +328,30 @@ kbd{
 /* ✅ 3D flip container */
 .card3d{
   position: relative;
+  width: 70px;              /* match .card width */
+  height: 100px;            /* match .card height */
+  display: block;
   transform-style: preserve-3d;
   transition: transform 420ms cubic-bezier(.2,.8,.2,1);
+  will-change: transform;
 }
 
 /* We render two faces: front is your normal .card, back is your normal .card.back */
 .cardFace{
   position:absolute;
   inset:0;
+  width: 100%;
+  height: 100%;
   backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 /* front face becomes visible when rotated */
 .cardFace.front{ transform: rotateY(180deg); }
 
+
+/* explicit back face baseline (prevents weird backface artifacts) */
+.cardFace.back{ transform: rotateY(0deg); }
 /* When faceup, rotate 180deg to show front */
 .card3d.faceup{ transform: rotateY(180deg); }
 
