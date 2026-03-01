@@ -100,6 +100,30 @@
             </div>
           </div>
 
+          <!-- NEW: Counting panel -->
+          <div class="panel">
+            <h3>Counting (Hi-Lo)</h3>
+            <div class="row hint" style="display:flex;justify-content:space-between;gap:12px;">
+              <div>Running: <strong id="countRunning">0</strong></div>
+              <div>True: <strong id="countTrue">0.00</strong></div>
+            </div>
+            <div class="small note">
+              Hole card is counted when revealed (realistic).
+            </div>
+          </div>
+
+          <!-- NEW: Stats panel -->
+          <div class="panel">
+            <h3>Stats (Session)</h3>
+            <div class="row hint" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;">
+              <div>Hands: <strong id="statHands">0</strong></div>
+              <div>Profit/Hand: <strong id="statPPH">$0</strong></div>
+              <div>Wagered: <strong id="statWagered">$0</strong></div>
+              <div>Returned: <strong id="statReturned">$0</strong></div>
+              <div>Net: <strong id="statNet">$0</strong></div>
+            </div>
+          </div>
+
           <div class="panel">
             <h3>Training</h3>
             <div class="row">
@@ -119,6 +143,12 @@
             <div class="row trainingBox" aria-live="polite">
               <div class="k">Recommendation</div>
               <div id="recommendation">—</div>
+            </div>
+
+            <!-- NEW: Trainer metrics -->
+            <div class="row hint" style="display:flex;justify-content:space-between;gap:12px;">
+              <div>Errors: <strong id="trainerErrors">0</strong></div>
+              <div>Est. EV Loss: <strong id="trainerEvLoss">$0</strong></div>
             </div>
           </div>
 

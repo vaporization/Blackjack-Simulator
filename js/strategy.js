@@ -60,9 +60,6 @@ export function recommendMove({ handCards, dealerUpcard, legalMoves }) {
   if (!up) return { move: null, reason: "" };
 
   // Insurance recommendation: Bicycle guidance isn't explicit here; we do NOT recommend it.
-  // We'll only show insurance as "optional; not recommended" in UI.
-  // So: never auto-recommend insurance; auto-play will also skip unless user manually selects.
-  // (Keeps it aligned with many basic-strategy norms, without inventing new Bicycle rules.)
 
   // If blackjack, stand (no action needed)
   if (isBlackjack(handCards, { blackjackEligible: true })) {

@@ -109,6 +109,18 @@ export class Shoe {
     return this.cards.length;
   }
 
+  decksRemaining() {
+    // Useful for true-count: remaining / 52
+    return this.remaining() / 52;
+  }
+
+  penetration() {
+    // 0..1 proportion of shoe dealt (ignoring cutDepth nuance)
+    const total = this.totalCards();
+    if (!total) return 0;
+    return this.position / total;
+  }
+
   cutIndex() {
     // When position >= (total - cutDepth), we consider the cut reached
     return Math.max(0, this.cards.length - this.cutDepth);

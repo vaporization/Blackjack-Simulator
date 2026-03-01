@@ -2,6 +2,7 @@
 import { evaluateHand, upcardValueForStrategy } from "./hand.js";
 
 function $(id) { return document.getElementById(id); }
+function $opt(id) { return document.getElementById(id) || null; }
 
 function cardEl(card, { hidden = false } = {}) {
   const d = document.createElement("div");
@@ -31,6 +32,13 @@ function cardEl(card, { hidden = false } = {}) {
   d.appendChild(s);
   d.appendChild(mini);
   return d;
+}
+
+function fmtMoney(n) {
+  if (!Number.isFinite(n)) return "—";
+  // keep cents if present
+  const hasCents = Math.abs(n % 1) > 1e-9;
+  return hasCents ? n.toFixed(2) : String(Math.trunc(n));
 }
 
 export class UI {
@@ -76,7 +84,20 @@ export class UI {
       toggleAutoplay: $("toggleAutoplay"),
       toggleMultiSplit: $("toggleMultiSplit"),
 
-      recommendation: $("recommendation")
+      recommendation: $("recommendation"),
+
+      // OPTIONAL (only if you add them to index.html)
+      countRunning: $opt("countRunning"),
+      countTrue: $opt("countTrue"),
+
+      statHands: $opt("statHands"),
+      statWagered: $opt("statWagered"),
+      statReturned: $opt("statReturned"),
+      statNet: $opt("statNet"),
+      statPPH: $opt("statPPH"),
+
+      trainerErrors: $opt("trainerErrors"),
+      trainerEvLoss: $opt("trainerEvLoss"),
     };
 
     this.el.betInput.value = 10;
@@ -191,6 +212,24 @@ export class UI {
     this.el.maxBetHint.textContent = `$${s.settings.maxBet}`;
     this.el.betInput.min = String(s.settings.minBet);
     this.el.betInput.max = String(s.settings.maxBet);
+
+    // OPTIONAL: Counting + Stats + Trainer (only if your Game.snapshot() includes these)
+    // AND only if the HTML has the elements.
+    if (s.counting) {
+      if (this.el.countRunning) this.el.countRunning.textContent = String(s.counting.running);
+      if (this.el.countTrue) this.el.countTrue.textContent = (Number.isFinite(s.counting.true) ? s.counting.true.toFixed(2) : "—");
+    }
+    if (s.stats) {
+      if (this.el.statHands) this.el.statHands.textContent = String(s.stats.hands ?? 0);
+      if (this.el.statWagered) this.el.statWagered.textContent = `$${fmtMoney(s.stats.wagered ?? 0)}`;
+      if (this.el.statReturned) this.el.statReturned.textContent = `$${fmtMoney(s.stats.returned ?? 0)}`;
+      if (this.el.statNet) this.el.statNet.textContent = `$${fmtMoney(s.stats.net ?? 0)}`;
+      if (this.el.statPPH) this.el.statPPH.textContent = `$${fmtMoney(s.stats.profitPerHand ?? 0)}`;
+    }
+    if (s.trainer) {
+      if (this.el.trainerErrors) this.el.trainerErrors.textContent = String(s.trainer.errors ?? 0);
+      if (this.el.trainerEvLoss) this.el.trainerEvLoss.textContent = `$${fmtMoney(s.trainer.evLoss ?? 0)}`;
+    }
 
     // Dealer UI
     this.el.dealerCards.innerHTML = "";
