@@ -1,11 +1,7 @@
 // js/ui.js
-import { evaluateHand, formatCard, upcardValueForStrategy } from "./hand.js";
+import { evaluateHand, upcardValueForStrategy } from "./hand.js";
 
 function $(id) { return document.getElementById(id); }
-
-function suitColorClass(suit) {
-  return (suit === "♥" || suit === "♦") ? "red" : "black";
-}
 
 function cardEl(card, { hidden = false } = {}) {
   const d = document.createElement("div");
@@ -94,17 +90,21 @@ export class UI {
   bind(game) {
     this.game = game;
 
+    // Buttons
     this.el.btnDeal.addEventListener("click", () => game.startRound(this.el.betInput.value));
     this.el.btnHit.addEventListener("click", () => game.hit());
     this.el.btnStand.addEventListener("click", () => game.stand());
     this.el.btnDouble.addEventListener("click", () => game.doubleDown());
     this.el.btnSplit.addEventListener("click", () => game.split());
+
+    // Insurance button = TAKE insurance (optional). Player can also just act to implicitly decline.
     this.el.btnInsurance.addEventListener("click", () => game.takeInsurance());
 
     this.el.btnResetShoe.addEventListener("click", () => game.resetShoe());
     this.el.btnResetBankroll.addEventListener("click", () => game.resetBankroll());
     this.el.btnResetRound.addEventListener("click", () => this.clearLog());
 
+    // Keyboard
     window.addEventListener("keydown", (e) => {
       const tag = (e.target && e.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea") return;
@@ -116,7 +116,7 @@ export class UI {
       if (k === "x") return game.doubleDown();
       if (k === "p") return game.split();
       if (k === "i") return game.takeInsurance();
-      if (k === "n") return game.declineInsurance?.();
+      // Note: decline insurance is implicit by taking any action (Hit/Stand/Double/Split)
     });
 
     this.el.toggleAutoplay.addEventListener("change", () => {
@@ -180,11 +180,13 @@ export class UI {
   syncAll(game) {
     const s = game.snapshot();
 
+    // Top status
     this.el.bankroll.textContent = `$${s.bankroll}`;
     this.el.shoeStatus.textContent = s.shoe.statusText;
     this.el.roundNo.textContent = String(s.roundNo);
     this.el.phase.textContent = s.phase;
 
+    // Settings hints
     this.el.minBetHint.textContent = `$${s.settings.minBet}`;
     this.el.maxBetHint.textContent = `$${s.settings.maxBet}`;
     this.el.betInput.min = String(s.settings.minBet);
@@ -258,8 +260,10 @@ export class UI {
       this.el.playerHands.appendChild(hand);
     });
 
+    // Phase note
     this.el.playerNote.textContent = phaseNote(s);
 
+    // Buttons enabled/disabled based on legality
     const legal = computeLegalFromSnapshot(s);
 
     this.el.btnDeal.disabled = (s.phase !== "betting" && s.phase !== "done");
@@ -268,9 +272,13 @@ export class UI {
     this.el.btnDouble.disabled = !legal.double;
     this.el.btnSplit.disabled = !legal.split;
 
+    // Insurance button only enabled during insurance phase (taking insurance is optional)
     this.el.btnInsurance.disabled = !(s.phase === "insurance");
-    this.el.btnInsurance.textContent = (s.phase === "insurance") ? "Insurance (½ bet)" : "Insurance";
+    this.el.btnInsurance.textContent = (s.phase === "insurance")
+      ? "Take Insurance (½ bet)"
+      : "Insurance";
 
+    // Recommendation
     const trainingOn = !!s.settings.training;
     if (trainingOn) {
       const rec = game.getRecommendation();
@@ -280,9 +288,11 @@ export class UI {
       this.el.recommendation.textContent = "—";
     }
 
+    // Sync toggles
     this.el.toggleTraining.checked = !!s.settings.training;
     this.el.toggleAutoplay.checked = !!s.settings.autoplay;
 
+    // Shoe & cut display
     this.el.cutDepthReadout.textContent = String(this.el.cutDepth.value);
   }
 }
@@ -292,6 +302,7 @@ function computeLegalFromSnapshot(s) {
   const hand = s.playerHands.find(h => h.isActive);
   if (!hand) return { hit:false, stand:false, double:false, split:false };
 
+  // ✅ Allow acting during insurance phase (insurance is optional)
   const canAct = (phase === "player" || phase === "insurance") && !hand.done;
 
   const hit = canAct && !hand.eval.isBust;
@@ -303,19 +314,17 @@ function computeLegalFromSnapshot(s) {
     (hand.eval.total === 9 || hand.eval.total === 10 || hand.eval.total === 11) &&
     (s.bankroll >= hand.baseBet);
 
-  const maxHands = s.settings.allowMultiSplit ? 4 : 2;
-  const underHandCap = s.playerHands.length < maxHands;
-  const alreadySplit = s.playerHands.length > 1;
-  const splitAllowedBySetting = s.settings.allowMultiSplit ? true : !alreadySplit;
-
   const canSplit = canAct &&
-    underHandCap &&
-    splitAllowedBySetting &&
     hand.cards.length === 2 &&
     (hand.cards[0]?.rank === hand.cards[1]?.rank) &&
-    (s.bankroll >= hand.baseBet);
+    (s.bankroll >= hand.baseBet) &&
+    (s.settings.allowMultiSplit ? true : (countSplits(s.playerHands) === 0));
 
   return { hit, stand, double: canDouble, split: canSplit };
+}
+
+function countSplits(hands) {
+  return (hands.length > 1) ? 1 : 0;
 }
 
 function badgeForOutcome(outcome, isBJ) {
@@ -352,7 +361,7 @@ function badgeForOutcome(outcome, isBJ) {
 function phaseNote(s) {
   if (s.phase === "betting") return "Place a bet and press Deal.";
   if (s.phase === "initial_deal") return "Dealing...";
-  if (s.phase === "insurance") return "Dealer shows Ace: you may buy Insurance OR just play (action = no insurance).";
+  if (s.phase === "insurance") return "Dealer shows Ace: Insurance is optional. Take insurance or just play to decline.";
   if (s.phase === "player") return `Your turn — play the highlighted hand.`;
   if (s.phase === "dealer") return "Dealer playing out hand...";
   if (s.phase === "settlement") return "Settling bets...";
