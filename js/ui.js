@@ -5,33 +5,15 @@ function $(id) { return document.getElementById(id); }
 function $opt(id) { return document.getElementById(id) || null; }
 
 /**
- * Creates a flippable card:
- *  - wrapper (.cardWrap) for deal-in animation
- *  - inner (.card3d) for 3D flip
- *  - two faces: front = .card, back = .card.back
- *
- * This preserves your existing card visuals exactly.
+ * Build a normal face-up card (front only).
+ * Keeps your existing .card look 100% unchanged.
  */
-function cardEl(card, { hidden = false, animate = false, flipOnReveal = false } = {}) {
-  const wrap = document.createElement("div");
-  wrap.className = "cardWrap" + (animate ? " deal-in" : "");
-  wrap.setAttribute("role", "presentation");
-
-  const c3d = document.createElement("div");
-  c3d.className = "card3d " + (hidden ? "facedown" : "faceup") + (flipOnReveal ? " flip" : "");
-  c3d.setAttribute("role", "img");
-
-  // FRONT FACE (your normal card)
-  const frontFace = document.createElement("div");
-  frontFace.className = "cardFace front";
-
+function buildFrontCard(card) {
   const front = document.createElement("div");
   front.className = "card";
+  front.setAttribute("role", "img");
   front.dataset.suit = card.suit;
-
-  if (!hidden) {
-    front.setAttribute("aria-label", `Card ${card.rank} of ${card.suit}`);
-  }
+  front.setAttribute("aria-label", `Card ${card.rank} of ${card.suit}`);
 
   const r = document.createElement("div");
   r.className = "r";
@@ -48,25 +30,59 @@ function cardEl(card, { hidden = false, animate = false, flipOnReveal = false } 
   front.appendChild(r);
   front.appendChild(s);
   front.appendChild(mini);
-  frontFace.appendChild(front);
 
-  // BACK FACE (your normal back)
-  const backFace = document.createElement("div");
-  backFace.className = "cardFace back";
+  return front;
+}
 
+/**
+ * Build a normal back card (your existing .card.back).
+ */
+function buildBackCard() {
   const back = document.createElement("div");
   back.className = "card back";
-  back.dataset.suit = card.suit; // harmless
+  back.setAttribute("role", "img");
   back.setAttribute("aria-label", "Dealer hole card (hidden)");
-  backFace.appendChild(back);
+  return back;
+}
+
+/**
+ * Creates a card element with:
+ * - deal-in animation wrapper for ALL cards
+ * - 3D flip ONLY for dealer hole card
+ *
+ * Options:
+ * - hidden: whether the card is face-down (ONLY meaningful for dealer hole card)
+ * - animate: apply deal-in animation to the wrapper
+ * - flippable: if true, build 3D flip structure (we only use this for dealer hole card)
+ * - flipOnReveal: if true, adds flip animation when turning face-up
+ */
+function cardEl(card, { hidden = false, animate = false, flippable = false, flipOnReveal = false } = {}) {
+  const wrap = document.createElement("div");
+  wrap.className = "cardWrap" + (animate ? " deal-in" : "");
+
+  // ✅ Most cards: render FRONT ONLY (no back face exists, so it cannot “flip” incorrectly)
+  if (!flippable) {
+    wrap.appendChild(buildFrontCard(card));
+    return wrap;
+  }
+
+  // ✅ Dealer hole card only: render flip stack (front + back)
+  const c3d = document.createElement("div");
+  c3d.className = "card3d " + (hidden ? "facedown" : "faceup") + (flipOnReveal ? " flip" : "");
+
+  // back face
+  const backFace = document.createElement("div");
+  backFace.className = "cardFace back";
+  backFace.appendChild(buildBackCard());
+
+  // front face
+  const frontFace = document.createElement("div");
+  frontFace.className = "cardFace front";
+  frontFace.appendChild(buildFrontCard(card));
 
   c3d.appendChild(frontFace);
   c3d.appendChild(backFace);
   wrap.appendChild(c3d);
-
-  // aria label for the whole thing
-  if (hidden) c3d.setAttribute("aria-label", "Dealer hole card (hidden)");
-  else c3d.setAttribute("aria-label", `Card ${card.rank} of ${card.suit}`);
 
   return wrap;
 }
@@ -139,11 +155,11 @@ export class UI {
     this.el.betInput.value = 10;
     this._logLines = [];
 
-    // For animations: track previous counts so we only animate newly added cards
+    // Track previous state to animate only NEW cards, and flip only on reveal
     this._prev = {
       dealerCount: 0,
       dealerHoleHidden: true,
-      playerCardCounts: [] // per hand
+      playerCardCounts: []
     };
 
     this.el.cutDepth.addEventListener("input", () => {
@@ -157,8 +173,7 @@ export class UI {
     const press = (btn) => {
       if (!btn) return;
       btn.classList.remove("press");
-      // force reflow so animation can replay
-      void btn.offsetWidth;
+      void btn.offsetWidth; // replay
       btn.classList.add("press");
     };
 
@@ -169,7 +184,6 @@ export class UI {
     this.el.btnDouble.addEventListener("click", () => { press(this.el.btnDouble); game.doubleDown(); });
     this.el.btnSplit.addEventListener("click", () => { press(this.el.btnSplit); game.split(); });
 
-    // Insurance button = TAKE insurance (optional). Player can also just act to implicitly decline.
     this.el.btnInsurance.addEventListener("click", () => { press(this.el.btnInsurance); game.takeInsurance(); });
 
     this.el.btnResetShoe.addEventListener("click", () => game.resetShoe());
@@ -188,7 +202,6 @@ export class UI {
       if (k === "x") return game.doubleDown();
       if (k === "p") return game.split();
       if (k === "i") return game.takeInsurance();
-      // Note: decline insurance is implicit by taking any action (Hit/Stand/Double/Split)
     });
 
     this.el.toggleAutoplay.addEventListener("change", () => {
@@ -217,20 +230,11 @@ export class UI {
   }
 
   handleEvent(evt) {
-    if (evt.type === "log") {
-      this.addLog(evt.time, evt.msg);
-      return;
-    }
-
-    if (evt.type === "clearLog") {
-      this.clearLog();
-      return;
-    }
-
+    if (evt.type === "log") return this.addLog(evt.time, evt.msg);
+    if (evt.type === "clearLog") return this.clearLog();
     if (evt.type === "state") {
       if (!this.game) return;
       this.syncAll(this.game);
-      return;
     }
   }
 
@@ -264,7 +268,7 @@ export class UI {
     this.el.betInput.min = String(s.settings.minBet);
     this.el.betInput.max = String(s.settings.maxBet);
 
-    // OPTIONAL: Counting + Stats + Trainer (only if your Game.snapshot() includes these)
+    // OPTIONAL: Counting + Stats + Trainer
     if (s.counting) {
       if (this.el.countRunning) this.el.countRunning.textContent = String(s.counting.running);
       if (this.el.countTrue) this.el.countTrue.textContent = (Number.isFinite(s.counting.true) ? s.counting.true.toFixed(2) : "—");
@@ -281,7 +285,7 @@ export class UI {
       if (this.el.trainerEvLoss) this.el.trainerEvLoss.textContent = `$${fmtMoney(s.trainer.evLoss ?? 0)}`;
     }
 
-    // ---- Dealer UI (with flip + deal animation) ----
+    // ---- Dealer UI ----
     this.el.dealerCards.innerHTML = "";
     const dealerCards = s.dealer.cards;
 
@@ -293,13 +297,15 @@ export class UI {
       const isHole = (idx === 1);
       const hidden = isHole && holeIsHidden;
 
-      // animate new dealer cards (after initial render) OR flip on reveal
       const flipOnReveal = isHole && holeWasHidden && !holeIsHidden;
       const animate =
         (dealerCountNow > this._prev.dealerCount && idx >= this._prev.dealerCount) ||
         flipOnReveal;
 
-      this.el.dealerCards.appendChild(cardEl(c, { hidden, animate, flipOnReveal }));
+      // ✅ ONLY the dealer hole card is flippable
+      const flippable = isHole;
+
+      this.el.dealerCards.appendChild(cardEl(c, { hidden, animate, flippable, flipOnReveal }));
     });
 
     const dealerUp = s.dealer.upcard;
@@ -318,7 +324,7 @@ export class UI {
       }
     }
 
-    // ---- Player hands UI (deal animation for newly added cards) ----
+    // ---- Player hands UI (NEVER flippable) ----
     this.el.playerHands.innerHTML = "";
     const nextCounts = [];
 
@@ -363,7 +369,7 @@ export class UI {
 
       h.cards.forEach((c, cidx) => {
         const animate = (h.cards.length > prevCount) && (cidx >= prevCount);
-        cards.appendChild(cardEl(c, { hidden: false, animate, flipOnReveal: false }));
+        cards.appendChild(cardEl(c, { hidden: false, animate, flippable: false, flipOnReveal: false }));
       });
 
       hand.appendChild(head);
@@ -383,7 +389,6 @@ export class UI {
     this.el.btnDouble.disabled = !legal.double;
     this.el.btnSplit.disabled = !legal.split;
 
-    // Insurance button only enabled during insurance phase (taking insurance is optional)
     this.el.btnInsurance.disabled = !(s.phase === "insurance");
     this.el.btnInsurance.textContent = (s.phase === "insurance")
       ? "Take Insurance (½ bet)"
@@ -406,7 +411,7 @@ export class UI {
     // Shoe & cut display
     this.el.cutDepthReadout.textContent = String(this.el.cutDepth.value);
 
-    // Save prev snapshot bits for next animation diff
+    // Save prev for next diff
     this._prev.dealerCount = dealerCountNow;
     this._prev.dealerHoleHidden = holeIsHidden;
     this._prev.playerCardCounts = nextCounts;
@@ -418,7 +423,6 @@ function computeLegalFromSnapshot(s) {
   const hand = s.playerHands.find(h => h.isActive);
   if (!hand) return { hit:false, stand:false, double:false, split:false };
 
-  // ✅ Allow acting during insurance phase (insurance is optional)
   const canAct = (phase === "player" || phase === "insurance") && !hand.done;
 
   const hit = canAct && !hand.eval.isBust;
