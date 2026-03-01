@@ -83,12 +83,9 @@ export class UI {
       recommendation: $("recommendation")
     };
 
-    // defaults for bet input (will be synced by game)
     this.el.betInput.value = 10;
-
     this._logLines = [];
 
-    // settings UI niceties
     this.el.cutDepth.addEventListener("input", () => {
       this.el.cutDepthReadout.textContent = String(this.el.cutDepth.value);
     });
@@ -121,17 +118,16 @@ export class UI {
       if (k === "x") return game.doubleDown();
       if (k === "p") return game.split();
       if (k === "i") return game.takeInsurance();
+      // optional: quick decline insurance
+      if (k === "n") return game.declineInsurance?.();
     });
 
-    // If autoplay toggled on mid-round, tick immediately
     this.el.toggleAutoplay.addEventListener("change", () => {
       this.syncAll(game);
-      // Let the game loop continue naturally (game auto-ticks after each state emission)
     });
   }
 
   getSettings() {
-    // Read settings from UI
     const decks = Number(this.el.decks.value);
     const cutDepth = Number(this.el.cutDepth.value);
     const minBet = Number(this.el.minBet.value);
@@ -143,7 +139,6 @@ export class UI {
     const autoplay = !!this.el.toggleAutoplay.checked;
     const allowMultiSplit = !!this.el.toggleMultiSplit.checked;
 
-    // Keep bet input bounded by min/max hints (UI convenience)
     if (Number.isFinite(minBet) && Number.isFinite(maxBet)) {
       this.el.betInput.min = String(minBet);
       this.el.betInput.max = String(maxBet);
@@ -157,16 +152,17 @@ export class UI {
       this.addLog(evt.time, evt.msg);
       return;
     }
-    
+
     if (evt.type === "clearLog") {
       this.clearLog();
       return;
     }
+
     if (evt.type === "state") {
-     if (!this.game) return; // ignore early state before bind()
+      if (!this.game) return;
       this.syncAll(this.game);
       return;
-}
+    }
   }
 
   addLog(time, msg) {
@@ -181,7 +177,7 @@ export class UI {
   clearLog() {
     this._logLines = [];
     this.el.log.innerHTML = "";
-    this.addLog(new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"}), "Log cleared.");
+    this.addLog(new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", second:"2-digit" }), "Log cleared.");
   }
 
   syncAll(game) {
@@ -227,7 +223,8 @@ export class UI {
     this.el.playerHands.innerHTML = "";
     s.playerHands.forEach((h, idx) => {
       const hand = document.createElement("div");
-      hand.className = "hand" + (h.isActive && s.phase === "player" ? " active" : "");
+      // ✅ highlight during insurance too (since you can act)
+      hand.className = "hand" + (h.isActive && (s.phase === "player" || s.phase === "insurance") ? " active" : "");
 
       const head = document.createElement("div");
       head.className = "hand-head";
@@ -279,7 +276,7 @@ export class UI {
     this.el.btnDouble.disabled = !legal.double;
     this.el.btnSplit.disabled = !legal.split;
 
-    // Insurance: visible-ish only in insurance phase; disabled otherwise
+    // Insurance button: only enabled in insurance phase
     this.el.btnInsurance.disabled = !(s.phase === "insurance");
     this.el.btnInsurance.textContent = (s.phase === "insurance") ? "Insurance (½ bet)" : "Insurance";
 
@@ -293,7 +290,7 @@ export class UI {
       this.el.recommendation.textContent = "—";
     }
 
-    // Sync toggles (avoid flipping while user edits)
+    // Sync toggles
     this.el.toggleTraining.checked = !!s.settings.training;
     this.el.toggleAutoplay.checked = !!s.settings.autoplay;
 
@@ -307,7 +304,8 @@ function computeLegalFromSnapshot(s) {
   const hand = s.playerHands.find(h => h.isActive);
   if (!hand) return { hit:false, stand:false, double:false, split:false };
 
-  const canAct = phase === "player" && !hand.done;
+  // ✅ Allow acting during insurance phase (action implies decline insurance)
+  const canAct = (phase === "player" || phase === "insurance") && !hand.done;
 
   const hit = canAct && !hand.eval.isBust;
   const stand = canAct;
@@ -328,7 +326,6 @@ function computeLegalFromSnapshot(s) {
 }
 
 function countSplits(hands) {
-  // If there are more than one hand, a split occurred
   return (hands.length > 1) ? 1 : 0;
 }
 
@@ -366,7 +363,7 @@ function badgeForOutcome(outcome, isBJ) {
 function phaseNote(s) {
   if (s.phase === "betting") return "Place a bet and press Deal.";
   if (s.phase === "initial_deal") return "Dealing...";
-  if (s.phase === "insurance") return "Dealer shows Ace: Insurance decision now (optional).";
+  if (s.phase === "insurance") return "Dealer shows Ace: you may buy Insurance OR just play (action = no insurance).";
   if (s.phase === "player") return `Your turn — play the highlighted hand.`;
   if (s.phase === "dealer") return "Dealer playing out hand...";
   if (s.phase === "settlement") return "Settling bets...";
