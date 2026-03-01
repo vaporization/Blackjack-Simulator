@@ -448,7 +448,11 @@ kbd{
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   overflow: hidden;
-  min-height: 420px;
+
+  /* UPDATED: make the 3D stage significantly larger */
+  min-height: 560px;
+  height: clamp(520px, 62vh, 760px);
+
   position: relative;
 }
 

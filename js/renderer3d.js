@@ -63,7 +63,14 @@ function makeCardTexture({ rank, suit, faceUp }) {
 
 function makeCardMaterial(card, faceUp) {
   const tex = makeCardTexture({ rank: card.rank, suit: card.suit, faceUp });
-  return new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+  return new THREE.MeshStandardMaterial({
+    map: tex,
+    roughness: faceUp ? 0.65 : 0.9,
+    metalness: 0.02,
+    emissive: new THREE.Color(0xffffff),
+    emissiveIntensity: faceUp ? 0.18 : 0.08,
+    side: THREE.DoubleSide
+  });
 }
 
 export class ThreeTable {
@@ -86,19 +93,24 @@ export class ThreeTable {
     this.container = container;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x050a14, 2.0, 7.5);
+    this.scene.fog = new THREE.Fog(0x050a14, 3.0, 12.0);
 
     const w = container.clientWidth || 800;
     const h = container.clientHeight || 420;
 
-    this.camera = new THREE.PerspectiveCamera(35, w / h, 0.1, 50);
-    this.camera.position.set(0, 2.6, 5.2);
-    this.camera.lookAt(0, 0, 0);
+    this.camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 60);
+    this.camera.position.set(0, 2.9, 4.3);
+    this.camera.lookAt(0, 0, 0.15);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(w, h);
     this.renderer.setClearColor(0x000000, 0);
+
+    // Better color/contrast
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
 
     // wipe any children and mount canvas
     container.innerHTML = "";
@@ -106,7 +118,7 @@ export class ThreeTable {
 
     // Table plane
     const tableGeo = new THREE.PlaneGeometry(8, 4.6);
-    const tableMat = new THREE.MeshBasicMaterial({ color: 0x0b3b2e });
+    const tableMat = new THREE.MeshStandardMaterial({ color: 0x0b3b2e, roughness: 0.95, metalness: 0.0 });
     const table = new THREE.Mesh(tableGeo, tableMat);
     table.rotation.x = -Math.PI / 2;
     table.position.y = -0.02;
@@ -114,11 +126,22 @@ export class ThreeTable {
 
     // subtle "rail"
     const railGeo = new THREE.RingGeometry(2.2, 3.0, 64);
-    const railMat = new THREE.MeshBasicMaterial({ color: 0x0a1020, transparent: true, opacity: 0.25 });
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x0a1020, transparent: true, opacity: 0.28, roughness: 0.9, metalness: 0.0 });
     const rail = new THREE.Mesh(railGeo, railMat);
     rail.rotation.x = -Math.PI / 2;
     rail.position.y = -0.019;
     this.scene.add(rail);
+
+
+    // Lighting (kept simple + performant)
+    const amb = new THREE.AmbientLight(0xffffff, 0.55);
+    this.scene.add(amb);
+    const key = new THREE.DirectionalLight(0xffffff, 0.9);
+    key.position.set(2.5, 5.0, 3.5);
+    this.scene.add(key);
+    const fill = new THREE.PointLight(0x66aaff, 0.35, 20);
+    fill.position.set(-3.5, 3.0, 1.5);
+    this.scene.add(fill);
 
     // Resize observer
     this._resizeObs = new ResizeObserver(() => this._resize());
@@ -197,9 +220,9 @@ export class ThreeTable {
       const isHole = i === 1;
       const faceUp = !(isHole && s.dealer?.holeHidden);
 
-      const x = -1.2 + i * 0.85;
-      const z = -0.8;
-      const y = 0.02 + i * 0.001;
+      const x = -1.55 + i * 1.02;
+      const z = -1.15;
+      const y = 0.03 + i * 0.001;
       this._upsertCard(key, card, faceUp, x, y, z, 0);
     });
 
@@ -210,9 +233,9 @@ export class ThreeTable {
       active.cards.forEach((card, i) => {
         const key = `P${i}`;
         needed.add(key);
-        const x = -1.2 + i * 0.85;
-        const z = 0.95;
-        const y = 0.02 + i * 0.001;
+        const x = -1.55 + i * 1.02;
+        const z = 1.10;
+        const y = 0.03 + i * 0.001;
         const rot = (i - (active.cards.length - 1) / 2) * 0.05;
         this._upsertCard(key, card, true, x, y, z, rot);
       });
@@ -233,7 +256,7 @@ export class ThreeTable {
 
   _upsertCard(key, card, faceUp, x, y, z, rotY) {
     let mesh = this._cards.get(key);
-    const w = 0.78;
+    const w = 0.92;
     const h = w * (356 / 256);
 
     if (!mesh) {
