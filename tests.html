@@ -1,0 +1,35 @@
+
+```html
+<!-- tests.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Blackjack Simulator — Tests</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="title">Blackjack Simulator — Tests</div>
+      <div class="subtitle">Lightweight unit tests (in-browser)</div>
+    </div>
+    <div class="statusbar">
+      <div class="pill"><span class="k">Result</span> <span id="result">—</span></div>
+      <div class="pill"><a href="./index.html">Back to game</a></div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="table" style="max-width: 900px;">
+      <div class="panel">
+        <h3>Test Output</h3>
+        <div id="out" class="logbody" style="height: 60vh;"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./js/tests.js"></script>
+</body>
+</html>
