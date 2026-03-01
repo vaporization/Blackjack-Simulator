@@ -4,18 +4,35 @@ import { evaluateHand, upcardValueForStrategy } from "./hand.js";
 function $(id) { return document.getElementById(id); }
 function $opt(id) { return document.getElementById(id) || null; }
 
-function cardEl(card, { hidden = false } = {}) {
-  const d = document.createElement("div");
-  d.className = "card" + (hidden ? " back" : "");
-  d.setAttribute("role", "img");
-  d.dataset.suit = card.suit;
+/**
+ * Creates a flippable card:
+ *  - wrapper (.cardWrap) for deal-in animation
+ *  - inner (.card3d) for 3D flip
+ *  - two faces: front = .card, back = .card.back
+ *
+ * This preserves your existing card visuals exactly.
+ */
+function cardEl(card, { hidden = false, animate = false, flipOnReveal = false } = {}) {
+  const wrap = document.createElement("div");
+  wrap.className = "cardWrap" + (animate ? " deal-in" : "");
+  wrap.setAttribute("role", "presentation");
 
-  if (hidden) {
-    d.setAttribute("aria-label", "Dealer hole card (hidden)");
-    return d;
+  const c3d = document.createElement("div");
+  c3d.className = "card3d " + (hidden ? "facedown" : "faceup") + (flipOnReveal ? " flip" : "");
+  c3d.setAttribute("role", "img");
+
+  // FRONT FACE (your normal card)
+  const frontFace = document.createElement("div");
+  frontFace.className = "cardFace front";
+
+  const front = document.createElement("div");
+  front.className = "card";
+  front.dataset.suit = card.suit;
+
+  if (!hidden) {
+    front.setAttribute("aria-label", `Card ${card.rank} of ${card.suit}`);
   }
 
-  d.setAttribute("aria-label", `Card ${card.rank} of ${card.suit}`);
   const r = document.createElement("div");
   r.className = "r";
   r.textContent = card.rank;
@@ -28,15 +45,34 @@ function cardEl(card, { hidden = false } = {}) {
   mini.className = "mini";
   mini.textContent = `${card.rank}${card.suit}`;
 
-  d.appendChild(r);
-  d.appendChild(s);
-  d.appendChild(mini);
-  return d;
+  front.appendChild(r);
+  front.appendChild(s);
+  front.appendChild(mini);
+  frontFace.appendChild(front);
+
+  // BACK FACE (your normal back)
+  const backFace = document.createElement("div");
+  backFace.className = "cardFace back";
+
+  const back = document.createElement("div");
+  back.className = "card back";
+  back.dataset.suit = card.suit; // harmless
+  back.setAttribute("aria-label", "Dealer hole card (hidden)");
+  backFace.appendChild(back);
+
+  c3d.appendChild(frontFace);
+  c3d.appendChild(backFace);
+  wrap.appendChild(c3d);
+
+  // aria label for the whole thing
+  if (hidden) c3d.setAttribute("aria-label", "Dealer hole card (hidden)");
+  else c3d.setAttribute("aria-label", `Card ${card.rank} of ${card.suit}`);
+
+  return wrap;
 }
 
 function fmtMoney(n) {
   if (!Number.isFinite(n)) return "—";
-  // keep cents if present
   const hasCents = Math.abs(n % 1) > 1e-9;
   return hasCents ? n.toFixed(2) : String(Math.trunc(n));
 }
@@ -103,6 +139,13 @@ export class UI {
     this.el.betInput.value = 10;
     this._logLines = [];
 
+    // For animations: track previous counts so we only animate newly added cards
+    this._prev = {
+      dealerCount: 0,
+      dealerHoleHidden: true,
+      playerCardCounts: [] // per hand
+    };
+
     this.el.cutDepth.addEventListener("input", () => {
       this.el.cutDepthReadout.textContent = String(this.el.cutDepth.value);
     });
@@ -111,15 +154,23 @@ export class UI {
   bind(game) {
     this.game = game;
 
+    const press = (btn) => {
+      if (!btn) return;
+      btn.classList.remove("press");
+      // force reflow so animation can replay
+      void btn.offsetWidth;
+      btn.classList.add("press");
+    };
+
     // Buttons
-    this.el.btnDeal.addEventListener("click", () => game.startRound(this.el.betInput.value));
-    this.el.btnHit.addEventListener("click", () => game.hit());
-    this.el.btnStand.addEventListener("click", () => game.stand());
-    this.el.btnDouble.addEventListener("click", () => game.doubleDown());
-    this.el.btnSplit.addEventListener("click", () => game.split());
+    this.el.btnDeal.addEventListener("click", () => { press(this.el.btnDeal); game.startRound(this.el.betInput.value); });
+    this.el.btnHit.addEventListener("click", () => { press(this.el.btnHit); game.hit(); });
+    this.el.btnStand.addEventListener("click", () => { press(this.el.btnStand); game.stand(); });
+    this.el.btnDouble.addEventListener("click", () => { press(this.el.btnDouble); game.doubleDown(); });
+    this.el.btnSplit.addEventListener("click", () => { press(this.el.btnSplit); game.split(); });
 
     // Insurance button = TAKE insurance (optional). Player can also just act to implicitly decline.
-    this.el.btnInsurance.addEventListener("click", () => game.takeInsurance());
+    this.el.btnInsurance.addEventListener("click", () => { press(this.el.btnInsurance); game.takeInsurance(); });
 
     this.el.btnResetShoe.addEventListener("click", () => game.resetShoe());
     this.el.btnResetBankroll.addEventListener("click", () => game.resetBankroll());
@@ -214,7 +265,6 @@ export class UI {
     this.el.betInput.max = String(s.settings.maxBet);
 
     // OPTIONAL: Counting + Stats + Trainer (only if your Game.snapshot() includes these)
-    // AND only if the HTML has the elements.
     if (s.counting) {
       if (this.el.countRunning) this.el.countRunning.textContent = String(s.counting.running);
       if (this.el.countTrue) this.el.countTrue.textContent = (Number.isFinite(s.counting.true) ? s.counting.true.toFixed(2) : "—");
@@ -231,12 +281,25 @@ export class UI {
       if (this.el.trainerEvLoss) this.el.trainerEvLoss.textContent = `$${fmtMoney(s.trainer.evLoss ?? 0)}`;
     }
 
-    // Dealer UI
+    // ---- Dealer UI (with flip + deal animation) ----
     this.el.dealerCards.innerHTML = "";
     const dealerCards = s.dealer.cards;
+
+    const dealerCountNow = dealerCards.length;
+    const holeWasHidden = !!this._prev.dealerHoleHidden;
+    const holeIsHidden = !!s.dealer.holeHidden;
+
     dealerCards.forEach((c, idx) => {
-      const hidden = (idx === 1 && s.dealer.holeHidden);
-      this.el.dealerCards.appendChild(cardEl(c, { hidden }));
+      const isHole = (idx === 1);
+      const hidden = isHole && holeIsHidden;
+
+      // animate new dealer cards (after initial render) OR flip on reveal
+      const flipOnReveal = isHole && holeWasHidden && !holeIsHidden;
+      const animate =
+        (dealerCountNow > this._prev.dealerCount && idx >= this._prev.dealerCount) ||
+        flipOnReveal;
+
+      this.el.dealerCards.appendChild(cardEl(c, { hidden, animate, flipOnReveal }));
     });
 
     const dealerUp = s.dealer.upcard;
@@ -255,8 +318,10 @@ export class UI {
       }
     }
 
-    // Player hands UI
+    // ---- Player hands UI (deal animation for newly added cards) ----
     this.el.playerHands.innerHTML = "";
+    const nextCounts = [];
+
     s.playerHands.forEach((h, idx) => {
       const hand = document.createElement("div");
       hand.className = "hand" + (h.isActive && (s.phase === "player" || s.phase === "insurance") ? " active" : "");
@@ -292,7 +357,14 @@ export class UI {
 
       const cards = document.createElement("div");
       cards.className = "hand-cards";
-      h.cards.forEach(c => cards.appendChild(cardEl(c)));
+
+      const prevCount = this._prev.playerCardCounts[idx] ?? 0;
+      nextCounts[idx] = h.cards.length;
+
+      h.cards.forEach((c, cidx) => {
+        const animate = (h.cards.length > prevCount) && (cidx >= prevCount);
+        cards.appendChild(cardEl(c, { hidden: false, animate, flipOnReveal: false }));
+      });
 
       hand.appendChild(head);
       hand.appendChild(cards);
@@ -333,6 +405,11 @@ export class UI {
 
     // Shoe & cut display
     this.el.cutDepthReadout.textContent = String(this.el.cutDepth.value);
+
+    // Save prev snapshot bits for next animation diff
+    this._prev.dealerCount = dealerCountNow;
+    this._prev.dealerHoleHidden = holeIsHidden;
+    this._prev.playerCardCounts = nextCounts;
   }
 }
 
