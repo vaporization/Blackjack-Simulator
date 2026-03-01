@@ -11,6 +11,7 @@ function cardEl(card, { hidden = false } = {}) {
   const d = document.createElement("div");
   d.className = "card" + (hidden ? " back" : "");
   d.setAttribute("role", "img");
+  d.dataset.suit = card.suit;
 
   if (hidden) {
     d.setAttribute("aria-label", "Dealer hole card (hidden)");
