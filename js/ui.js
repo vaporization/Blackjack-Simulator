@@ -156,14 +156,16 @@ export class UI {
       this.addLog(evt.time, evt.msg);
       return;
     }
+    
     if (evt.type === "clearLog") {
       this.clearLog();
       return;
     }
     if (evt.type === "state") {
+     if (!this.game) return; // ignore early state before bind()
       this.syncAll(this.game);
       return;
-    }
+}
   }
 
   addLog(time, msg) {
@@ -283,7 +285,7 @@ export class UI {
     // Recommendation
     const trainingOn = !!s.settings.training;
     if (trainingOn) {
-      const rec = this.game.getRecommendation();
+      const rec = game.getRecommendation();
       if (!rec.move) this.el.recommendation.textContent = "—";
       else this.el.recommendation.textContent = `${rec.move.toUpperCase()} — ${rec.reason}`;
     } else {
