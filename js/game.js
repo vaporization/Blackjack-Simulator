@@ -746,6 +746,11 @@ export class Game {
 
     this.emit("log", { msg: `Dealer reveals hole card: ${this.dealer.cards[1].rank}${this.dealer.cards[1].suit}.` });
 
+    // ✅ UI robustness: emit a state immediately on reveal so the hole card
+    // flips even if something later short-circuits dealer play/settlement.
+    // (Also feels more like a real table: reveal happens before hits.)
+    this.emit("state");
+
     const dealerBJ = isBlackjack(this.dealer.cards, { blackjackEligible: true });
     if (!this.round.dealerPeeked && dealerBJ) {
       this.emit("log", { msg: `Dealer has Blackjack (no earlier peek).` });

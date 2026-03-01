@@ -327,7 +327,15 @@ kbd{
 
 /* ✅ 3D flip container */
 .card3d{
+  /*
+    IMPORTANT: the flip stack uses absolutely-positioned faces.
+    Give the container an explicit size + positioning context so it
+    never collapses during rapid re-renders (fixes rare “hole card
+    didn't flip / card desync” glitches).
+  */
   position: relative;
+  width: 70px;
+  height: 100px;
   transform-style: preserve-3d;
   transition: transform 420ms cubic-bezier(.2,.8,.2,1);
 }
