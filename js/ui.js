@@ -94,7 +94,6 @@ export class UI {
   bind(game) {
     this.game = game;
 
-    // Buttons
     this.el.btnDeal.addEventListener("click", () => game.startRound(this.el.betInput.value));
     this.el.btnHit.addEventListener("click", () => game.hit());
     this.el.btnStand.addEventListener("click", () => game.stand());
@@ -106,7 +105,6 @@ export class UI {
     this.el.btnResetBankroll.addEventListener("click", () => game.resetBankroll());
     this.el.btnResetRound.addEventListener("click", () => this.clearLog());
 
-    // Keyboard
     window.addEventListener("keydown", (e) => {
       const tag = (e.target && e.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea") return;
@@ -118,7 +116,6 @@ export class UI {
       if (k === "x") return game.doubleDown();
       if (k === "p") return game.split();
       if (k === "i") return game.takeInsurance();
-      // optional: quick decline insurance
       if (k === "n") return game.declineInsurance?.();
     });
 
@@ -177,19 +174,17 @@ export class UI {
   clearLog() {
     this._logLines = [];
     this.el.log.innerHTML = "";
-    this.addLog(new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", second:"2-digit" }), "Log cleared.");
+    this.addLog(new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"}), "Log cleared.");
   }
 
   syncAll(game) {
     const s = game.snapshot();
 
-    // Top status
     this.el.bankroll.textContent = `$${s.bankroll}`;
     this.el.shoeStatus.textContent = s.shoe.statusText;
     this.el.roundNo.textContent = String(s.roundNo);
     this.el.phase.textContent = s.phase;
 
-    // Settings hints
     this.el.minBetHint.textContent = `$${s.settings.minBet}`;
     this.el.maxBetHint.textContent = `$${s.settings.maxBet}`;
     this.el.betInput.min = String(s.settings.minBet);
@@ -223,7 +218,6 @@ export class UI {
     this.el.playerHands.innerHTML = "";
     s.playerHands.forEach((h, idx) => {
       const hand = document.createElement("div");
-      // ✅ highlight during insurance too (since you can act)
       hand.className = "hand" + (h.isActive && (s.phase === "player" || s.phase === "insurance") ? " active" : "");
 
       const head = document.createElement("div");
@@ -264,10 +258,8 @@ export class UI {
       this.el.playerHands.appendChild(hand);
     });
 
-    // Phase note
     this.el.playerNote.textContent = phaseNote(s);
 
-    // Buttons enabled/disabled based on legality
     const legal = computeLegalFromSnapshot(s);
 
     this.el.btnDeal.disabled = (s.phase !== "betting" && s.phase !== "done");
@@ -276,11 +268,9 @@ export class UI {
     this.el.btnDouble.disabled = !legal.double;
     this.el.btnSplit.disabled = !legal.split;
 
-    // Insurance button: only enabled in insurance phase
     this.el.btnInsurance.disabled = !(s.phase === "insurance");
     this.el.btnInsurance.textContent = (s.phase === "insurance") ? "Insurance (½ bet)" : "Insurance";
 
-    // Recommendation
     const trainingOn = !!s.settings.training;
     if (trainingOn) {
       const rec = game.getRecommendation();
@@ -290,11 +280,9 @@ export class UI {
       this.el.recommendation.textContent = "—";
     }
 
-    // Sync toggles
     this.el.toggleTraining.checked = !!s.settings.training;
     this.el.toggleAutoplay.checked = !!s.settings.autoplay;
 
-    // Shoe & cut display
     this.el.cutDepthReadout.textContent = String(this.el.cutDepth.value);
   }
 }
@@ -304,7 +292,6 @@ function computeLegalFromSnapshot(s) {
   const hand = s.playerHands.find(h => h.isActive);
   if (!hand) return { hit:false, stand:false, double:false, split:false };
 
-  // ✅ Allow acting during insurance phase (action implies decline insurance)
   const canAct = (phase === "player" || phase === "insurance") && !hand.done;
 
   const hit = canAct && !hand.eval.isBust;
@@ -316,17 +303,19 @@ function computeLegalFromSnapshot(s) {
     (hand.eval.total === 9 || hand.eval.total === 10 || hand.eval.total === 11) &&
     (s.bankroll >= hand.baseBet);
 
+  const maxHands = s.settings.allowMultiSplit ? 4 : 2;
+  const underHandCap = s.playerHands.length < maxHands;
+  const alreadySplit = s.playerHands.length > 1;
+  const splitAllowedBySetting = s.settings.allowMultiSplit ? true : !alreadySplit;
+
   const canSplit = canAct &&
+    underHandCap &&
+    splitAllowedBySetting &&
     hand.cards.length === 2 &&
     (hand.cards[0]?.rank === hand.cards[1]?.rank) &&
-    (s.bankroll >= hand.baseBet) &&
-    (s.settings.allowMultiSplit ? true : (countSplits(s.playerHands) === 0));
+    (s.bankroll >= hand.baseBet);
 
   return { hit, stand, double: canDouble, split: canSplit };
-}
-
-function countSplits(hands) {
-  return (hands.length > 1) ? 1 : 0;
 }
 
 function badgeForOutcome(outcome, isBJ) {

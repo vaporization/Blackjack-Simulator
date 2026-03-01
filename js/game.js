@@ -50,14 +50,12 @@ export class Game {
     this.settings.maxBet = Math.max(this.settings.minBet, Number(this.settings.maxBet || 500));
     this.settings.startingBankroll = Math.max(1, Number(this.settings.startingBankroll || 500));
 
-    // Sync shoe config (rebuild if needed)
     this.shoe.setConfig({
       decks: this.settings.decks,
       cutDepth: this.settings.cutDepth,
       seed: this.settings.seed
     });
 
-    // If bankroll was never initialized, set it
     if (typeof this.bankroll !== "number" || !Number.isFinite(this.bankroll)) {
       this.bankroll = this.settings.startingBankroll;
     }
@@ -105,24 +103,24 @@ export class Game {
     this.emit("clearLog");
   }
 
+  // ---------- Split limits ----------
+  _maxHandsAllowedThisRound() {
+    // Typical casino: up to 4 hands total (3 resplits).
+    return this.settings.allowMultiSplit ? 4 : 2;
+  }
+
   // ---------- Insurance behavior ----------
-  // If insurance is currently offered, any player action should be allowed to implicitly decline it.
   _declineInsuranceIfOffered() {
     if (this.phase !== "insurance") return;
     if (!this.round.insuranceOffered) return;
 
-    // If player already took/declined via button, nothing to do
-    // (insuranceTaken=false is same as declined, but we still need to advance phase)
     if (this.round.insuranceTaken) {
-      // Insurance already taken via button; flow will advance via _afterInsuranceChoice()
-      return;
+      return; // already handled via takeInsurance()
     }
 
-    // Explicitly mark declined (clean state)
     this.round.insuranceTaken = false;
     this.round.insuranceBet = 0;
 
-    // Now resolve peek result and continue
     if (this.round.dealerHasBlackjack) {
       this.dealer.holeHidden = false;
       this.emit("log", { msg: `Player declines insurance. Dealer has Blackjack.` });
@@ -140,7 +138,7 @@ export class Game {
   startRound(betAmount) {
     this.applySettings(this.getSettings());
 
-    // ✅ Clear previous round table state BEFORE anything else (keep bankroll + shoe, do NOT clear log)
+    // Clear previous round table state BEFORE anything else (keep bankroll + shoe, do NOT clear log)
     this.phase = "betting";
     this.dealer.cards = [];
     this.dealer.holeHidden = true;
@@ -160,7 +158,6 @@ export class Game {
     };
     this.emit("state");
 
-    // Reshuffle before starting if cut reached or shoe empty
     if (this.shoe.shouldReshuffleBeforeNextRound()) {
       this.shoe.reshuffle({ reseed: false });
       this.emit("log", { msg: `Cut card reached — reshuffling before next round.` });
@@ -185,10 +182,8 @@ export class Game {
     this.phase = "initial_deal";
     this.round.baseBet = bet;
 
-    // Take the base bet off bankroll (on table)
     this.bankroll -= bet;
 
-    // Create initial player hand
     this.playerHands = [{
       id: 1,
       cards: [],
@@ -203,7 +198,6 @@ export class Game {
     }];
     this.activeHandIndex = 0;
 
-    // Deal sequence: P up, D up, P up, D hole
     const p1 = this.shoe.draw();
     const d1 = this.shoe.draw();
     const p2 = this.shoe.draw();
@@ -216,7 +210,6 @@ export class Game {
     this.emit("log", { msg: `Round ${this.roundNo}: Player bet $${bet}. Dealing...` });
     this.emit("log", { msg: `Player receives ${p1.rank}${p1.suit}, ${p2.rank}${p2.suit}. Dealer shows ${d1.rank}${d1.suit}.` });
 
-    // Dealer peek rules: ONLY if upcard is Ace or ten-value
     const upcard = this.dealer.cards[0];
     const peekAllowed = (upcard.rank === "A" || isTenValue(upcard));
 
@@ -299,7 +292,6 @@ export class Game {
   }
 
   _afterInsuranceChoice() {
-    // After insurance decision, if dealer peeked and had blackjack => resolve immediately
     const upcard = this.dealer.cards[0];
     if (upcard.rank === "A") {
       const dealerBJ = this.round.dealerHasBlackjack === true;
@@ -324,18 +316,15 @@ export class Game {
     this._maybeAutoPlayTick();
   }
 
-  // If dealer has BJ, round ends immediately (except pushes for player BJ).
   _resolveDealerBlackjackImmediate() {
     this.phase = "settlement";
 
-    // Insurance settlement
     if (this.round.insuranceTaken && this.round.insuranceBet > 0) {
-      const win = this.round.insuranceBet * 3; // return + 2:1 profit
+      const win = this.round.insuranceBet * 3;
       this.bankroll += win;
       this.emit("log", { msg: `Insurance pays 2:1. Returned $${win}.` });
     }
 
-    // Main bet resolution
     for (const hand of this.playerHands) {
       const playerBJ = isBlackjack(hand.cards, { blackjackEligible: hand.blackjackEligible });
       if (playerBJ) {
@@ -364,24 +353,22 @@ export class Game {
     const up = this.dealer.cards[0];
     const upNum = up ? upcardValueForStrategy(up) : null;
 
-    // ✅ Allow actions during insurance (they will implicitly decline)
     const canAct = ((this.phase === "player" || this.phase === "insurance") && hand && !hand.done);
-
     const evald = hand ? evaluateHand(hand.cards) : { total: 0, isBust: false, soft: false };
-    const alreadySplitThisRound = this.round.splitCount > 0;
 
     // split legality
     const canSplitRank = hand && hand.cards.length === 2 && sameRank(hand.cards[0], hand.cards[1]);
-    const canSplitBankroll = hand && this.bankroll >= hand.bet;
-    const canSplitByRules = canSplitRank && canSplitBankroll && canAct;
+    const canSplitBankroll = hand && this.bankroll >= hand.baseBet;
+    const underHandCap = this.playerHands.length < this._maxHandsAllowedThisRound();
 
-    const canSplit =
-      canSplitByRules &&
-      (this.settings.allowMultiSplit ? true : !alreadySplitThisRound);
+    const alreadySplitThisRound = this.round.splitCount > 0;
+    const splitAllowedBySetting = this.settings.allowMultiSplit ? true : !alreadySplitThisRound;
+
+    const canSplit = canAct && canSplitRank && canSplitBankroll && underHandCap && splitAllowedBySetting;
 
     // double legality (Bicycle default)
     const canDoubleTotal = (evald.total === 9 || evald.total === 10 || evald.total === 11);
-    const canDoubleBankroll = hand && this.bankroll >= hand.bet;
+    const canDoubleBankroll = hand && this.bankroll >= hand.baseBet;
     const canDouble = canAct && hand.cards.length === 2 && !hand.isDoubled && canDoubleTotal && canDoubleBankroll;
 
     const canInsurance = (this.phase === "insurance" && this.round.insuranceOffered);
@@ -397,10 +384,9 @@ export class Game {
   }
 
   hit() {
-    // ✅ If insurance is pending, allow hit to implicitly decline it
     this._declineInsuranceIfOffered();
-
     if (this.phase !== "player") return;
+
     const hand = this.currentHand();
     if (!hand || hand.done) return;
 
@@ -426,10 +412,9 @@ export class Game {
   }
 
   stand() {
-    // ✅ If insurance is pending, allow stand to implicitly decline it
     this._declineInsuranceIfOffered();
-
     if (this.phase !== "player") return;
+
     const hand = this.currentHand();
     if (!hand || hand.done) return;
 
@@ -446,10 +431,9 @@ export class Game {
   }
 
   doubleDown() {
-    // ✅ If insurance is pending, allow double to implicitly decline it
     this._declineInsuranceIfOffered();
-
     if (this.phase !== "player") return;
+
     const hand = this.currentHand();
     if (!hand || hand.done) return;
 
@@ -460,8 +444,7 @@ export class Game {
       return;
     }
 
-    // Take additional bet
-    this.bankroll -= hand.bet;
+    this.bankroll -= hand.baseBet;
     hand.bet += hand.baseBet;
     hand.isDoubled = true;
 
@@ -487,16 +470,15 @@ export class Game {
   }
 
   split() {
-    // ✅ If insurance is pending, allow split to implicitly decline it
     this._declineInsuranceIfOffered();
-
     if (this.phase !== "player") return;
+
     const hand = this.currentHand();
     if (!hand || hand.done) return;
 
     const lm = this._computeLegalMovesObject();
     if (!lm.split) {
-      this.emit("log", { msg: `Split not legal (need a pair, enough bankroll, and split limit not exceeded).` });
+      this.emit("log", { msg: `Split not legal (need a pair, enough bankroll, within hand cap, and split limit not exceeded).` });
       this.emit("state");
       return;
     }
@@ -504,9 +486,8 @@ export class Game {
     const [c1, c2] = hand.cards;
     if (!sameRank(c1, c2)) return;
 
-    // Take additional bet equal to original
+    // Take additional bet equal to baseBet
     this.bankroll -= hand.baseBet;
-
     this.round.splitCount += 1;
 
     const left = {
@@ -535,11 +516,13 @@ export class Game {
       outcome: null
     };
 
+    // Replace current hand with left+right in order
     this.playerHands.splice(this.activeHandIndex, 1, left, right);
 
     this.emit("log", { msg: `Player splits pair. Added bet $${hand.baseBet}. Now playing left hand first.` });
 
     if (left.isSplitAce || right.isSplitAce) {
+      // Split Aces rule: exactly one card to each Ace, auto-stand both (no further hits).
       const lcard = this.shoe.draw();
       const rcard = this.shoe.draw();
       left.cards.push(lcard);
@@ -554,29 +537,35 @@ export class Game {
       this._advanceToDealerPlay();
       this.emit("state");
       return;
-    } else {
-      const lcard = this.shoe.draw();
-      left.cards.push(lcard);
-      this.emit("log", { msg: `Left hand receives ${lcard.rank}${lcard.suit}.` });
-
-      this.emit("state");
-      this._maybeAutoPlayTick();
     }
+
+    // ✅ IMPORTANT FIX:
+    // For normal splits, deal one card to EACH new hand immediately.
+    const lcard = this.shoe.draw();
+    const rcard = this.shoe.draw();
+    left.cards.push(lcard);
+    right.cards.push(rcard);
+
+    // Keep active hand on left (current index)
+    this.emit("log", { msg: `Left hand receives ${lcard.rank}${lcard.suit}. Right hand receives ${rcard.rank}${rcard.suit}.` });
+
+    this.emit("state");
+    this._maybeAutoPlayTick();
   }
 
   _computeLegalMovesObject() {
     const hand = this.currentHand();
     const canAct = (this.phase === "player" && hand && !hand.done);
     const e = hand ? evaluateHand(hand.cards) : { total: 0, isBust: false };
-    const alreadySplitThisRound = this.round.splitCount > 0;
 
     const canSplitRank = hand && hand.cards.length === 2 && sameRank(hand.cards[0], hand.cards[1]);
     const canSplitBankroll = hand && this.bankroll >= hand.baseBet;
-    const canSplit =
-      canAct &&
-      canSplitRank &&
-      canSplitBankroll &&
-      (this.settings.allowMultiSplit ? true : !alreadySplitThisRound);
+    const underHandCap = this.playerHands.length < this._maxHandsAllowedThisRound();
+
+    const alreadySplitThisRound = this.round.splitCount > 0;
+    const splitAllowedBySetting = this.settings.allowMultiSplit ? true : !alreadySplitThisRound;
+
+    const canSplit = canAct && canSplitRank && canSplitBankroll && underHandCap && splitAllowedBySetting;
 
     const canDoubleTotal = (e.total === 9 || e.total === 10 || e.total === 11);
     const canDoubleBankroll = hand && this.bankroll >= hand.baseBet;
@@ -591,6 +580,7 @@ export class Game {
   }
 
   _advanceToNextHandOrDealer() {
+    // Move to next unfinished hand if any, else dealer play
     for (let i = 0; i < this.playerHands.length; i++) {
       const idx = (this.activeHandIndex + 1 + i) % this.playerHands.length;
       if (!this.playerHands[idx].done) {
