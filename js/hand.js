@@ -1,78 +1,102 @@
 // js/hand.js
-// Hand evaluation logic (soft totals, blackjack detection, etc.)
+// Core hand utilities for Blackjack
 
-export function cardValue(card) {
-  const r = card.rank;
-  if (r === "A") return 11; // initially count as 11; we'll reduce via soft logic
-  if (r === "K" || r === "Q" || r === "J") return 10;
-  return Number(r); // 2..10
+// Card shape expected throughout:
+// { rank: "A"|"2"|...|"10"|"J"|"Q"|"K", suit: "♠"|"♥"|"♦"|"♣" }
+
+export function formatCard(c) {
+  if (!c) return "";
+  return `${c.rank}${c.suit}`;
+}
+
+export function sameRank(a, b) {
+  if (!a || !b) return false;
+  return String(a.rank) === String(b.rank);
 }
 
 export function isTenValue(card) {
-  return card.rank === "10" || card.rank === "J" || card.rank === "Q" || card.rank === "K";
+  if (!card) return false;
+  const r = String(card.rank);
+  return r === "10" || r === "J" || r === "Q" || r === "K";
 }
 
-export function isAce(card) {
-  return card.rank === "A";
+// For strategy tables, Ace is treated as 11 (often shown as "A")
+export function upcardValueForStrategy(card) {
+  if (!card) return 0;
+  const r = String(card.rank);
+
+  if (r === "A") return 11;
+  if (r === "K" || r === "Q" || r === "J" || r === "10") return 10;
+
+  const n = Number(r);
+  return Number.isFinite(n) ? n : 0;
 }
 
-export function sameRank(c1, c2) {
-  return c1 && c2 && c1.rank === c2.rank;
+function cardValueForTotal(card) {
+  const r = String(card.rank);
+
+  // ✅ Ace starts as 11 in Blackjack hand totals
+  if (r === "A") return 11;
+
+  // Face cards / ten
+  if (r === "K" || r === "Q" || r === "J" || r === "10") return 10;
+
+  const n = Number(r);
+  return Number.isFinite(n) ? n : 0;
 }
 
-export function evaluateHand(cards) {
-  // Returns best total <=21 if possible, else lowest total (bust total),
-  // plus soft flag indicating an Ace is currently being counted as 11.
+// Returns: { total, soft, isBust }
+export function evaluateHand(cards = []) {
   let total = 0;
   let aces = 0;
 
   for (const c of cards) {
-    if (c.rank === "A") aces++;
-    total += cardValue(c);
+    if (!c) continue;
+    const r = String(c.rank);
+    if (r === "A") aces += 1;
+    total += cardValueForTotal(c);
   }
 
-  // Reduce Aces from 11 -> 1 as needed to avoid bust.
-  let soft = false;
+  // ✅ If we're over 21, convert A(11) -> A(1) by subtracting 10 per Ace
   while (total > 21 && aces > 0) {
-    total -= 10; // convert one Ace from 11 to 1
-    aces--;
+    total -= 10;
+    aces -= 1;
   }
 
-  // If total <= 21 and we still have at least one Ace counted as 11, it's soft.
-  // How to detect: if there exists an Ace that *could* be 11 without bust.
-  // Compute minimal total (all Aces as 1), then see if we can add 10.
-  const minTotal = cards.reduce((sum, c) => {
-    if (c.rank === "A") return sum + 1;
-    if (c.rank === "K" || c.rank === "Q" || c.rank === "J") return sum + 10;
-    return sum + Number(c.rank);
-  }, 0);
-  if (minTotal <= 11 && cards.some(c => c.rank === "A") && total <= 21) {
-    // There is at least one Ace that can be 11 (minTotal + 10 <= 21)
-    if (minTotal + 10 <= 21) soft = true;
-  }
+  // "soft" means at least one Ace is still being counted as 11
+  const soft = cards.some(c => c && String(c.rank) === "A") && total <= 21 && (() => {
+    // Recompute: if we can add 10 without busting, it means at least one Ace is still 11.
+    // Easier: detect whether any Ace is effectively 11 by checking if treating one Ace as 11 is possible.
+    // We can do this by computing a "hard total" (all aces as 1) and seeing if we added +10.
+    let hardTotal = 0;
+    for (const c of cards) {
+      if (!c) continue;
+      const r = String(c.rank);
+      if (r === "A") hardTotal += 1;
+      else hardTotal += cardValueForTotal(c);
+    }
+    return (hardTotal + 10) === total;
+  })();
 
-  const isBust = total > 21;
-  return { total, soft, isBust };
+  return {
+    total,
+    soft,
+    isBust: total > 21
+  };
 }
 
-export function isBlackjack(cards, { blackjackEligible = true } = {}) {
-  // Blackjack only if exactly 2 cards: Ace + ten-value, AND eligible.
+export function isBlackjack(cards = [], { blackjackEligible = true } = {}) {
   if (!blackjackEligible) return false;
-  if (cards.length !== 2) return false;
+  if (!Array.isArray(cards) || cards.length !== 2) return false;
+
   const [a, b] = cards;
-  return (isAce(a) && isTenValue(b)) || (isAce(b) && isTenValue(a));
-}
+  if (!a || !b) return false;
 
-export function formatCard(card) {
-  // Pretty display rank + suit
-  return `${card.rank}${card.suit}`;
-}
+  const ar = String(a.rank);
+  const br = String(b.rank);
 
-export function upcardValueForStrategy(card) {
-  // Map dealer upcard ranks to numeric for comparisons in strategy heuristics.
-  // A => 11
-  if (!card) return null;
-  if (card.rank === "A") return 11;
-  if (card.rank === "K" || card.rank === "Q" || card.rank === "J") return 10;
-  return Number(card.rank);
+  const oneAce = (ar === "A") || (br === "A");
+  const otherTen = (ar !== "A" && isTenValue(a)) || (br !== "A" && isTenValue(b));
+
+  return oneAce && otherTen;
 }

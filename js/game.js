@@ -679,28 +679,32 @@ export class Game {
     }
   }
 
-  _dealerPlayLoop() {
+    _dealerPlayLoop() {
     while (true) {
-      const e = evaluateHand(this.dealer.cards);
+        const e = evaluateHand(this.dealer.cards);
 
-      // Dealer must hit on 16 or less; stand on 17 or more.
-      // Dealer must stand on soft 17 (as required).
-      if (e.total < 17) {
+        // ✅ If dealer busts, stop immediately and log correctly
+        if (e.isBust) {
+        this.emit("log", { msg: `Dealer busts (${e.total}).` });
+        break;
+        }
+
+        if (e.total < 17) {
         const c = this.shoe.draw();
         this.dealer.cards.push(c);
         this.emit("log", { msg: `Dealer hits: ${c.rank}${c.suit}. (Total now ${evaluateHand(this.dealer.cards).total})` });
         continue;
-      }
+        }
 
-      if (e.total === 17 && e.soft) {
+        if (e.total === 17 && e.soft) {
         this.emit("log", { msg: `Dealer stands on soft 17.` });
         break;
-      }
+        }
 
-      this.emit("log", { msg: `Dealer stands on ${e.total}${e.soft ? " (soft)" : ""}.` });
-      break;
+        this.emit("log", { msg: `Dealer stands on ${e.total}${e.soft ? " (soft)" : ""}.` });
+        break;
     }
-  }
+    }
 
   _settleAllHands() {
     const dealerEval = evaluateHand(this.dealer.cards);
@@ -715,50 +719,52 @@ export class Game {
     }
 
     for (const hand of this.playerHands) {
-      const e = evaluateHand(hand.cards);
-      const playerBust = e.isBust;
+  const e = evaluateHand(hand.cards);
+  const playerBust = e.isBust;
 
-      // Player blackjack (only if eligible)
-      const playerBJ = isBlackjack(hand.cards, { blackjackEligible: hand.blackjackEligible });
+  // Player blackjack (only if eligible)
+  const playerBJ = isBlackjack(hand.cards, { blackjackEligible: hand.blackjackEligible });
 
-      if (playerBust) {
-        hand.outcome = "lose_bust";
-        this.emit("log", { msg: `Hand loses (bust).` });
-        continue;
-      }
+  if (playerBust) {
+    hand.outcome = "lose_bust";
+    this.emit("log", { msg: `Hand loses (bust).` });
+    continue;
+  }
 
-      // ✅ IMPORTANT: Pay blackjack before dealer-bust logic so BJ doesn’t accidentally become 1:1
-      if (playerBJ) {
-        const pay = Math.floor(hand.bet * 2.5 * 100) / 100; // bet returned + 3:2 profit
-        this.bankroll += pay;
-        hand.outcome = "win_blackjack";
-        this.emit("log", { msg: `Blackjack! Pays 3:2. Paid $${pay}.` });
-        continue;
-      }
+  // ✅ IMPORTANT: Blackjack payout must happen BEFORE dealer-bust payout.
+  if (playerBJ) {
+    // Pays 3:2 (total returned = bet * 2.5)
+    const pay = Math.floor(hand.bet * 2.5 * 100) / 100; // avoid float noise
+    this.bankroll += pay;
+    hand.outcome = "win_blackjack";
+    this.emit("log", { msg: `Blackjack! Pays 3:2. Paid $${pay}.` });
+    continue;
+  }
 
-      if (dealerBust) {
+    if (dealerBust) {
+        // Dealer bust: pay each non-bust 1:1
         const pay = hand.bet * 2;
         this.bankroll += pay;
         hand.outcome = "win_dealer_bust";
         this.emit("log", { msg: `Dealer busts. Hand wins 1:1. Paid $${pay}.` });
         continue;
-      }
+    }
 
-      // Compare totals
-      const playerTotal = e.total;
-      if (playerTotal > dealerTotal) {
+    // Compare totals
+    const playerTotal = e.total;
+    if (playerTotal > dealerTotal) {
         const pay = hand.bet * 2;
         this.bankroll += pay;
         hand.outcome = "win";
         this.emit("log", { msg: `Hand wins ${playerTotal} vs dealer ${dealerTotal}. Paid $${pay}.` });
-      } else if (playerTotal < dealerTotal) {
+    } else if (playerTotal < dealerTotal) {
         hand.outcome = "lose";
         this.emit("log", { msg: `Hand loses ${playerTotal} vs dealer ${dealerTotal}.` });
-      } else {
+    } else {
         this.bankroll += hand.bet;
         hand.outcome = "push";
         this.emit("log", { msg: `Push ${playerTotal} vs dealer ${dealerTotal}. Bet returned ($${hand.bet}).` });
-      }
+    }
     }
   }
 
