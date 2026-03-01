@@ -26,6 +26,12 @@
     <!-- LEFT: Table -->
     <section class="table" aria-label="Blackjack table">
       <div class="table-grid">
+        <div id="threeStage" class="threeStage" aria-label="3D table viewport" hidden>
+          <div class="threeHud" aria-hidden="true">
+            <div class="hudRow"><span class="hudLabel">Dealer</span> <span id="threeDealerHud">—</span></div>
+            <div class="hudRow"><span class="hudLabel">Player</span> <span id="threePlayerHud">—</span></div>
+          </div>
+        </div>
         <!-- Dealer -->
         <div class="area dealer" aria-label="Dealer area">
           <div class="area-head">
@@ -51,6 +57,17 @@
 
         <!-- Controls -->
         <div class="controls" aria-label="Controls and betting">
+          <div class="panel">
+            <h3>View</h3>
+            <div class="row">
+              <label class="label" for="viewMode">Mode</label>
+              <select id="viewMode" class="select">
+                <option value="2d" selected>2D</option>
+                <option value="3d">3D</option>
+              </select>
+            </div>
+          </div>
+
           <div class="panel">
             <h3>Bet</h3>
 
