@@ -5,8 +5,8 @@
 // - Hole-card flip animation on reveal (visual only; state still controls face)
 // - Supports dealer row + ACTIVE player hand (splits later)
 
-import * as THREE from "https://unpkg.com/three@0.161.0/build/three.module.js";
-import { OrbitControls } from "https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js";
+import * as THREE from "https://esm.sh/three@0.161.0";
+import { OrbitControls } from "https://esm.sh/three@0.161.0/examples/jsm/controls/OrbitControls.js";
 
 const SUIT_COLOR = { "♥": "#b91c1c", "♦": "#b91c1c", "♣": "#0b1220", "♠": "#0b1220" };
 
@@ -258,27 +258,18 @@ this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this._tick();
   }
 
-  _resize() {
-    if (!this.container || !this.renderer || !this.camera) return;
-    const w = this.container.clientWidth || 800;
-    const h = this.container.clientHeight || 520;
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h);
+_resize() {
+  if (!this.container || !this.renderer || !this.camera) return;
 
-    // Orbit controls (pan/zoom/orbit)
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
-    this.controls.enablePan = true;
-    this.controls.screenSpacePanning = true;
-    this.controls.minDistance = 3.2;
-    this.controls.maxDistance = 14.0;
-    this.controls.maxPolarAngle = Math.PI * 0.48; // keep above table
-    this.controls.target.set(0, 0, 0);
-    this.controls.update();
+  const w = this.container.clientWidth || 800;
+  const h = this.container.clientHeight || 520;
 
-  }
+  this.camera.aspect = w / h;
+  this.camera.updateProjectionMatrix();
+  this.renderer.setSize(w, h);
+
+  if (this.controls) this.controls.update();
+}
 
   destroy() {
     cancelAnimationFrame(this._raf);
