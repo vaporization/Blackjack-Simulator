@@ -329,153 +329,193 @@ _resize() {
     this.renderer.render(this.scene, this.camera);
   };
 
-  render(s) {
-    if (!this.scene) return;
+render(s) {
+  if (!this.scene) return;
 
-    // HUD
-    if (this.hudDealerEl) {
-      this.hudDealerEl.textContent = s.dealer?.holeHidden
-        ? `Up: ${s.dealer?.upcard?.rank ?? "—"}${s.dealer?.upcard?.suit ?? ""}`
-        : (s.dealer?.totalText ?? "Total: —");
-    }
-    if (this.hudPlayerEl) {
-      const act = (s.playerHands || []).find(h => h.isActive) || (s.playerHands || [])[0];
-      const t = act?.eval ? `${act.eval.total}${act.eval.soft ? " (soft)" : ""}` : "—";
-      this.hudPlayerEl.textContent = `Active: ${t}`;
-    }
+  // HUD
+  if (this.hudDealerEl) {
+    this.hudDealerEl.textContent = s.dealer?.holeHidden
+      ? `Up: ${s.dealer?.upcard?.rank ?? "—"}${s.dealer?.upcard?.suit ?? ""}`
+      : (s.dealer?.totalText ?? "Total: —");
+  }
+  if (this.hudPlayerEl) {
+    const act = (s.playerHands || []).find(h => h.isActive) || (s.playerHands || [])[0];
+    const t = act?.eval ? `${act.eval.total}${act.eval.soft ? " (soft)" : ""}` : "—";
+    this.hudPlayerEl.textContent = `Active: ${t}`;
+  }
 
-    const dealer = s.dealer?.cards || [];
-    const hands = s.playerHands || [];
+  const dealer = s.dealer?.cards || [];
+  const hands = s.playerHands || [];
 
-    const sig = JSON.stringify({
-      d: dealer.map(c => [c.rank, c.suit]),
-      hh: !!s.dealer?.holeHidden,
-      p: hands.map(h => h.cards.map(c => [c.rank, c.suit])),
-      a: hands.findIndex(h => h.isActive)
+  const sig = JSON.stringify({
+    d: dealer.map(c => [c.rank, c.suit]),
+    hh: !!s.dealer?.holeHidden,
+    p: hands.map(h => h.cards.map(c => [c.rank, c.suit])),
+    a: hands.findIndex(h => h.isActive)
+  });
+  const changed = (sig !== this._lastSig);
+  this._lastSig = sig;
+
+  const needed = new Set();
+
+  // Layout sizing
+  const cardW = 0.98;
+  const cardH = cardW * (712 / 512);
+
+  // -----------------------
+  // Dealer row
+  // -----------------------
+  dealer.forEach((card, i) => {
+    const key = `D${i}`;
+    needed.add(key);
+
+    const isHole = i === 1;
+    const faceUp = !(isHole && s.dealer?.holeHidden);
+
+    const x = -1.65 + i * 1.08;
+    const z = -1.55;
+    const y = 0.035 + i * 0.001;
+    const rot = (i - (dealer.length - 1) / 2) * 0.04;
+
+    this._upsertCard({
+      key, card, faceUp,
+      x, y, z,
+      rotY: rot,
+      rotZ: 0,
+      w: cardW, h: cardH,
+      animateOnNew: changed
     });
-    const changed = (sig !== this._lastSig);
-    this._lastSig = sig;
+  });
 
-    const needed = new Set();
+  // -----------------------
+  // Player hands (ALL hands)
+  // -----------------------
+  const activeIdx = hands.findIndex(h => h.isActive);
 
-    // Layout sizing
-    const cardW = 0.98;
-    const cardH = cardW * (712 / 512);
+  // Stack hands front-to-back (z+ is closer to camera in your setup)
+  const baseZ = 1.45;
+  const handSpacing = 1.20;
 
-    // Dealer row: move a bit closer + higher contrast (z negative = farther away)
-    dealer.forEach((card, i) => {
-      const key = `D${i}`;
+  hands.forEach((hand, hIdx) => {
+    const z = baseZ + (hIdx * handSpacing);
+    const lift = (hIdx === activeIdx ? 0.012 : 0); // subtle highlight
+
+    (hand.cards || []).forEach((card, i) => {
+      const key = `P${hIdx}_${i}`; // ✅ stable per-hand key
       needed.add(key);
 
-      const isHole = i === 1;
-      const faceUp = !(isHole && s.dealer?.holeHidden);
-
       const x = -1.65 + i * 1.08;
-      const z = -1.55;
-      const y = 0.035 + i * 0.001;
-      const rot = (i - (dealer.length - 1) / 2) * 0.04;
+      const y = 0.035 + i * 0.001 + lift;
+      const rot = (i - ((hand.cards.length - 1) / 2)) * 0.06;
 
-      this._upsertCard({ key, card, faceUp, x, y, z, rotY: rot, w: cardW, h: cardH, animateOnNew: changed });
+      this._upsertCard({
+        key, card, faceUp: true,
+        x, y, z,
+        rotY: rot,
+        rotZ: 0,
+        w: cardW, h: cardH,
+        animateOnNew: changed
+      });
     });
+  });
 
-    // Active player hand
-    const activeIdx = hands.findIndex(h => h.isActive);
-    const active = hands[activeIdx >= 0 ? activeIdx : 0];
-    if (active?.cards) {
-      active.cards.forEach((card, i) => {
-        const key = `P${i}`;
-        needed.add(key);
+  // -----------------------
+  // Hole-card reveal flip
+  // -----------------------
+  const holeHidden = !!s.dealer?.holeHidden;
+  if (this._lastHoleHidden && !holeHidden) {
+    const holeKey = "D1";
+    const mesh = this._cards.get(holeKey);
+    const holeCard = dealer[1];
 
-        const x = -1.65 + i * 1.08;
-        const z = 1.45;
-        const y = 0.035 + i * 0.001;
-        const rot = (i - (active.cards.length - 1) / 2) * 0.06;
+    if (mesh && holeCard) {
+      // ✅ flip around Z because cards are laid flat (rotation.x = -PI/2)
+      const fromRot = mesh.rotation.clone();
+      const toRot = mesh.rotation.clone();
+      toRot.z = fromRot.z + Math.PI;
 
-        this._upsertCard({ key, card, faceUp: true, x, y, z, rotY: rot, w: cardW, h: cardH, animateOnNew: changed });
-      });
-    }
-
-    // Hole-card reveal flip (if it just transitioned hidden->shown)
-    const holeHidden = !!s.dealer?.holeHidden;
-    if (this._lastHoleHidden && !holeHidden) {
-      const holeKey = "D1";
-      const mesh = this._cards.get(holeKey);
-      const holeCard = dealer[1];
-      if (mesh && holeCard) {
-        // If the card is currently the back, flip it
-        const fromRot = mesh.rotation.clone();
-        const toRot = mesh.rotation.clone();
-        toRot.y = fromRot.y + Math.PI;
-
-        this._anims.set(holeKey, {
-          type: "flip",
-          t0: performance.now(),
-          dur: 520,
-          fromRot,
-          toRot,
-          // swap to faceUp at halfway
-          swapAtHalf: { card: holeCard, faceUp: true }
-        });
-      }
-    }
-    this._lastHoleHidden = holeHidden;
-
-    // Remove unused
-    for (const key of Array.from(this._cards.keys())) {
-      if (!needed.has(key)) {
-        const mesh = this._cards.get(key);
-        this.scene.remove(mesh);
-        if (mesh.material?.map) mesh.material.map.dispose();
-        mesh.material?.dispose?.();
-        mesh.geometry?.dispose?.();
-        this._cards.delete(key);
-        this._anims.delete(key);
-      }
-    }
-  }
-
-  _upsertCard({ key, card, faceUp, x, y, z, rotY, w, h, animateOnNew }) {
-    let mesh = this._cards.get(key);
-
-    const targetPos = new THREE.Vector3(x, y, z);
-
-    if (!mesh) {
-      const geo = new THREE.PlaneGeometry(w, h);
-      const mat = makeCardMaterial(card, faceUp);
-      mesh = new THREE.Mesh(geo, mat);
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.rotation.y = rotY;
-      mesh.position.copy(this._shoePos); // start at shoe
-      this.scene.add(mesh);
-      this._cards.set(key, mesh);
-      mesh.userData = { rank: card.rank, suit: card.suit, faceUp };
-
-      // Deal-in animation
-      this._anims.set(key, {
-        type: "deal",
+      this._anims.set(holeKey, {
+        type: "flip",
         t0: performance.now(),
-        dur: 260,
-        fromPos: this._shoePos.clone(),
-        toPos: targetPos.clone()
+        dur: 520,
+        fromRot,
+        toRot,
+        swapAtHalf: { card: holeCard, faceUp: true }
       });
-      return;
     }
-
-    // Update texture if rank/suit/face changed (unless we are mid-flip and will swap)
-    const ud = mesh.userData || {};
-    const changed = ud.rank !== card.rank || ud.suit !== card.suit || ud.faceUp !== faceUp;
-    if (changed) {
-      // If this is the dealer hole and we are still hidden, keep it back.
-      if (!(key === "D1" && ud.faceUp === false && faceUp === true)) {
-        if (mesh.material?.map) mesh.material.map.dispose();
-        mesh.material?.dispose?.();
-        mesh.material = makeCardMaterial(card, faceUp);
-      }
-      mesh.userData = { rank: card.rank, suit: card.suit, faceUp };
-    }
-
-    // If card already exists, set target pos (no animation yet for reflows)
-    mesh.position.copy(targetPos);
-    mesh.rotation.y = rotY;
   }
+  this._lastHoleHidden = holeHidden;
+
+  // Remove unused
+  for (const key of Array.from(this._cards.keys())) {
+    if (!needed.has(key)) {
+      const mesh = this._cards.get(key);
+      this.scene.remove(mesh);
+      if (mesh.material?.map) mesh.material.map.dispose();
+      mesh.material?.dispose?.();
+      mesh.geometry?.dispose?.();
+      this._cards.delete(key);
+      this._anims.delete(key);
+    }
+  }
+}
+
+_upsertCard({ key, card, faceUp, x, y, z, rotY, rotZ = 0, w, h, animateOnNew }) {
+  let mesh = this._cards.get(key);
+
+  const targetPos = new THREE.Vector3(x, y, z);
+
+  if (!mesh) {
+    const geo = new THREE.PlaneGeometry(w, h);
+    const mat = makeCardMaterial(card, faceUp);
+    mesh = new THREE.Mesh(geo, mat);
+
+    // base orientation: card lays flat on table
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.y = rotY;
+    mesh.rotation.z = rotZ;
+
+    mesh.position.copy(this._shoePos); // start at shoe
+    this.scene.add(mesh);
+    this._cards.set(key, mesh);
+    mesh.userData = { rank: card.rank, suit: card.suit, faceUp };
+
+    // Deal-in animation
+    this._anims.set(key, {
+      type: "deal",
+      t0: performance.now(),
+      dur: 260,
+      fromPos: this._shoePos.clone(),
+      toPos: targetPos.clone()
+    });
+    return;
+  }
+
+  // Update texture if rank/suit/face changed (unless we are mid-flip and will swap)
+  const ud = mesh.userData || {};
+  const changed = ud.rank !== card.rank || ud.suit !== card.suit || ud.faceUp !== faceUp;
+
+  if (changed) {
+    // If this is the dealer hole and we are still hidden, keep it back until flip swaps it
+    if (!(key === "D1" && ud.faceUp === false && faceUp === true)) {
+      if (mesh.material?.map) mesh.material.map.dispose();
+      mesh.material?.dispose?.();
+      mesh.material = makeCardMaterial(card, faceUp);
+    }
+    mesh.userData = { rank: card.rank, suit: card.suit, faceUp };
+  }
+
+  // Position always updates
+  mesh.position.copy(targetPos);
+
+  // Keep the card flat & keep yaw fan
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.rotation.y = rotY;
+
+  // ✅ do NOT stomp z-rotation if a flip is running (flip anim controls rotation.z)
+  const a = this._anims.get(key);
+  if (!(a && a.type === "flip")) {
+    mesh.rotation.z = rotZ;
+  }
+}
 }
