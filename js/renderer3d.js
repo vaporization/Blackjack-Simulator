@@ -1,78 +1,153 @@
 // js/renderer3d.js
-// Lightweight 3D table renderer (no game logic).
-// Phase 1: static layout + live card textures (no dealing animation yet).
+// 3D table renderer (rendering only; no blackjack logic).
+// - Better table + lighting (clear, no "fogged glass")
+// - Deal-in animation for newly appeared cards
+// - Hole-card flip animation on reveal (visual only; state still controls face)
+// - Supports dealer row + ACTIVE player hand (splits later)
 
 import * as THREE from "https://unpkg.com/three@0.161.0/build/three.module.js";
 
-const SUIT_COLOR = { "♥": "#d83a3a", "♦": "#d83a3a", "♣": "#111111", "♠": "#111111" };
+const SUIT_COLOR = { "♥": "#b91c1c", "♦": "#b91c1c", "♣": "#0b1220", "♠": "#0b1220" };
 
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+function easeInOutQuad(t){ return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2; }
+
+// ---------- Textures ----------
 function makeCardTexture({ rank, suit, faceUp }) {
-  const w = 256, h = 356;
+  const w = 512, h = 712; // higher res for crisp text
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
   const g = c.getContext("2d");
 
-  // background + border
-  g.fillStyle = faceUp ? "#f7f8fb" : "#163a7a";
-  g.fillRect(0, 0, w, h);
-  g.lineWidth = 10;
-  g.strokeStyle = faceUp ? "#dfe3ee" : "#0e2a60";
-  g.strokeRect(8, 8, w - 16, h - 16);
+  // subtle shadow (gives contrast without looking foggy)
+  g.clearRect(0,0,w,h);
 
   if (!faceUp) {
-    // simple back pattern
-    g.globalAlpha = 0.25;
+    // back (high contrast, not washed)
+    const grad = g.createLinearGradient(0,0,w,h);
+    grad.addColorStop(0, "#113a7a");
+    grad.addColorStop(1, "#0b6b62");
+    g.fillStyle = grad;
+    g.fillRect(0,0,w,h);
+
+    g.lineWidth = 18;
+    g.strokeStyle = "rgba(255,255,255,0.18)";
+    g.strokeRect(14,14,w-28,h-28);
+
+    // pattern
+    g.globalAlpha = 0.22;
     g.fillStyle = "#ffffff";
-    for (let y = 24; y < h; y += 28) {
-      for (let x = 24; x < w; x += 28) {
+    for (let y = 36; y < h; y += 36) {
+      for (let x = 36; x < w; x += 36) {
         g.beginPath();
-        g.arc(x, y, 6, 0, Math.PI * 2);
+        g.arc(x, y, 7, 0, Math.PI * 2);
         g.fill();
       }
     }
-    g.globalAlpha = 1;
-    return new THREE.CanvasTexture(c);
+    g.globalAlpha = 1.0;
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    tex.needsUpdate = true;
+    return tex;
   }
 
-  const col = SUIT_COLOR[suit] || "#111";
+  // face
+  // background with very light gradient (prevents "fog" feel)
+  const bg = g.createLinearGradient(0,0,0,h);
+  bg.addColorStop(0, "#ffffff");
+  bg.addColorStop(1, "#f2f4f8");
+  g.fillStyle = bg;
+  g.fillRect(0,0,w,h);
+
+  // border
+  g.lineWidth = 16;
+  g.strokeStyle = "rgba(15,23,42,0.14)";
+  g.strokeRect(12,12,w-24,h-24);
+
+  // inner bevel
+  g.lineWidth = 6;
+  g.strokeStyle = "rgba(15,23,42,0.08)";
+  g.strokeRect(36,36,w-72,h-72);
+
+  const col = SUIT_COLOR[suit] || "#0b1220";
   g.fillStyle = col;
 
-  // corner
-  g.font = "bold 64px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-  g.fillText(rank, 26, 78);
-  g.font = "bold 56px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-  g.fillText(suit, 32, 138);
-
-  // center pip
-  g.font = "bold 140px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-  g.textAlign = "center";
-  g.textBaseline = "middle";
-  g.fillText(suit, w / 2, h / 2 + 10);
-
-  // mini corner
+  // corner rank/suit
   g.textAlign = "left";
   g.textBaseline = "alphabetic";
-  g.font = "bold 34px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-  g.fillText(rank + suit, 26, h - 34);
+  g.font = "800 120px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  g.fillText(rank, 58, 150);
+  g.font = "800 104px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  g.fillText(suit, 66, 260);
+
+  // center pip
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.font = "800 260px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  g.fillText(suit, w/2, h/2 + 10);
+
+  // bottom mini
+  g.textAlign = "left";
+  g.textBaseline = "alphabetic";
+  g.font = "800 64px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+  g.fillText(`${rank}${suit}`, 56, h - 56);
 
   const tex = new THREE.CanvasTexture(c);
-  tex.anisotropy = 4;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
 }
 
 function makeCardMaterial(card, faceUp) {
   const tex = makeCardTexture({ rank: card.rank, suit: card.suit, faceUp });
-  return new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshStandardMaterial({
     map: tex,
-    roughness: faceUp ? 0.65 : 0.9,
-    metalness: 0.02,
-    emissive: new THREE.Color(0xffffff),
-    emissiveIntensity: faceUp ? 0.18 : 0.08,
+    roughness: 0.92,
+    metalness: 0.0,
     side: THREE.DoubleSide
   });
+  return mat;
 }
 
+// Felt texture via canvas (cheap + nice)
+function makeFeltTexture() {
+  const s = 512;
+  const c = document.createElement("canvas");
+  c.width = s; c.height = s;
+  const g = c.getContext("2d");
+
+  const grad = g.createRadialGradient(s*0.5, s*0.45, s*0.05, s*0.5, s*0.5, s*0.65);
+  grad.addColorStop(0, "#0b4a38");
+  grad.addColorStop(1, "#062a21");
+  g.fillStyle = grad;
+  g.fillRect(0,0,s,s);
+
+  // subtle noise speckle
+  const img = g.getImageData(0,0,s,s);
+  const d = img.data;
+  for (let i=0;i<d.length;i+=4){
+    const n = (Math.random()*18)|0; // 0..17
+    d[i]   = clamp(d[i]   + n, 0, 255);
+    d[i+1] = clamp(d[i+1] + n, 0, 255);
+    d[i+2] = clamp(d[i+2] + n, 0, 255);
+    // alpha unchanged
+  }
+  g.putImageData(img,0,0);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2.2, 1.6);
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// ---------- Renderer ----------
 export class ThreeTable {
   constructor({ hudDealerEl = null, hudPlayerEl = null } = {}) {
     this.hudDealerEl = hudDealerEl;
@@ -84,64 +159,84 @@ export class ThreeTable {
     this.container = null;
 
     this._raf = 0;
-    this._cards = new Map(); // key -> mesh
-    this._lastSig = "";
     this._resizeObs = null;
+
+    this._cards = new Map(); // key -> mesh
+    this._anims = new Map(); // key -> {type, t0, dur, fromPos, toPos, fromRot, toRot, swapAtHalf}
+    this._lastSig = "";
+    this._lastHoleHidden = true;
+
+    // layout
+    this._shoePos = new THREE.Vector3(2.4, 0.05, 1.55); // where cards "come from"
   }
 
   init(container) {
     this.container = container;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x050a14, 3.0, 12.0);
 
     const w = container.clientWidth || 800;
-    const h = container.clientHeight || 420;
+    const h = container.clientHeight || 520;
 
-    this.camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 60);
-    this.camera.position.set(0, 2.9, 4.3);
-    this.camera.lookAt(0, 0, 0.15);
+    this.camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 80);
+    // Slightly higher and closer for readability
+    this.camera.position.set(0, 3.1, 4.65);
+    this.camera.lookAt(0, 0, 0.25);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(w, h);
     this.renderer.setClearColor(0x000000, 0);
 
-    // Better color/contrast
+    // Clear, non-washed color
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMapping = THREE.NoToneMapping;
 
-    // wipe any children and mount canvas
     container.innerHTML = "";
     container.appendChild(this.renderer.domElement);
 
-    // Table plane
-    const tableGeo = new THREE.PlaneGeometry(8, 4.6);
-    const tableMat = new THREE.MeshStandardMaterial({ color: 0x0b3b2e, roughness: 0.95, metalness: 0.0 });
+    // Table
+    const feltTex = makeFeltTexture();
+    const tableGeo = new THREE.PlaneGeometry(8.4, 5.2);
+    const tableMat = new THREE.MeshStandardMaterial({
+      map: feltTex,
+      roughness: 1.0,
+      metalness: 0.0
+    });
     const table = new THREE.Mesh(tableGeo, tableMat);
     table.rotation.x = -Math.PI / 2;
-    table.position.y = -0.02;
+    table.position.y = -0.03;
     this.scene.add(table);
 
-    // subtle "rail"
-    const railGeo = new THREE.RingGeometry(2.2, 3.0, 64);
-    const railMat = new THREE.MeshStandardMaterial({ color: 0x0a1020, transparent: true, opacity: 0.28, roughness: 0.9, metalness: 0.0 });
-    const rail = new THREE.Mesh(railGeo, railMat);
-    rail.rotation.x = -Math.PI / 2;
-    rail.position.y = -0.019;
-    this.scene.add(rail);
+    // Rail / vignette ring
+    const ringGeo = new THREE.RingGeometry(2.4, 3.25, 84);
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0x0a1222,
+      roughness: 1.0,
+      metalness: 0.0,
+      transparent: true,
+      opacity: 0.28
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = -0.028;
+    this.scene.add(ring);
 
-
-    // Lighting (kept simple + performant)
-    const amb = new THREE.AmbientLight(0xffffff, 0.55);
+    // Lights (tuned to avoid washout)
+    const amb = new THREE.AmbientLight(0xffffff, 0.40);
     this.scene.add(amb);
-    const key = new THREE.DirectionalLight(0xffffff, 0.9);
-    key.position.set(2.5, 5.0, 3.5);
+
+    const key = new THREE.DirectionalLight(0xffffff, 0.85);
+    key.position.set(2.8, 6.0, 3.8);
     this.scene.add(key);
-    const fill = new THREE.PointLight(0x66aaff, 0.35, 20);
-    fill.position.set(-3.5, 3.0, 1.5);
+
+    const fill = new THREE.DirectionalLight(0x7fb7ff, 0.22);
+    fill.position.set(-3.0, 3.5, 2.0);
     this.scene.add(fill);
+
+    const rim = new THREE.PointLight(0x66ffd9, 0.20, 20);
+    rim.position.set(0.0, 2.0, -3.2);
+    this.scene.add(rim);
 
     // Resize observer
     this._resizeObs = new ResizeObserver(() => this._resize());
@@ -153,7 +248,7 @@ export class ThreeTable {
   _resize() {
     if (!this.container || !this.renderer || !this.camera) return;
     const w = this.container.clientWidth || 800;
-    const h = this.container.clientHeight || 420;
+    const h = this.container.clientHeight || 520;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
@@ -170,6 +265,7 @@ export class ThreeTable {
       mesh.geometry?.dispose?.();
     }
     this._cards.clear();
+    this._anims.clear();
 
     if (this.renderer) this.renderer.dispose();
     if (this.container) this.container.innerHTML = "";
@@ -178,8 +274,40 @@ export class ThreeTable {
     this._lastSig = "";
   }
 
-  _tick = () => {
+  _tick = (now = performance.now()) => {
     this._raf = requestAnimationFrame(this._tick);
+
+    // advance animations
+    if (this._anims.size) {
+      for (const [key, a] of this._anims.entries()) {
+        const mesh = this._cards.get(key);
+        if (!mesh) { this._anims.delete(key); continue; }
+        const t = clamp((now - a.t0) / a.dur, 0, 1);
+        const e = (a.type === "deal") ? easeOutCubic(t) : easeInOutQuad(t);
+
+        if (a.fromPos && a.toPos) {
+          mesh.position.lerpVectors(a.fromPos, a.toPos, e);
+        }
+        if (a.fromRot && a.toRot) {
+          mesh.rotation.set(
+            a.fromRot.x + (a.toRot.x - a.fromRot.x) * e,
+            a.fromRot.y + (a.toRot.y - a.fromRot.y) * e,
+            a.fromRot.z + (a.toRot.z - a.fromRot.z) * e
+          );
+          // swap texture halfway through flip
+          if (a.swapAtHalf && t >= 0.5 && !a._swapped) {
+            a._swapped = true;
+            if (mesh.material?.map) mesh.material.map.dispose();
+            mesh.material?.dispose?.();
+            mesh.material = makeCardMaterial(a.swapAtHalf.card, a.swapAtHalf.faceUp);
+            mesh.userData.faceUp = a.swapAtHalf.faceUp;
+          }
+        }
+
+        if (t >= 1) this._anims.delete(key);
+      }
+    }
+
     if (!this.renderer || !this.scene || !this.camera) return;
     this.renderer.render(this.scene, this.camera);
   };
@@ -208,38 +336,72 @@ export class ThreeTable {
       p: hands.map(h => h.cards.map(c => [c.rank, c.suit])),
       a: hands.findIndex(h => h.isActive)
     });
-    if (sig === this._lastSig) return;
+    const changed = (sig !== this._lastSig);
     this._lastSig = sig;
 
     const needed = new Set();
 
-    // Dealer row
+    // Layout sizing
+    const cardW = 0.98;
+    const cardH = cardW * (712 / 512);
+
+    // Dealer row: move a bit closer + higher contrast (z negative = farther away)
     dealer.forEach((card, i) => {
       const key = `D${i}`;
       needed.add(key);
+
       const isHole = i === 1;
       const faceUp = !(isHole && s.dealer?.holeHidden);
 
-      const x = -1.55 + i * 1.02;
-      const z = -1.15;
-      const y = 0.03 + i * 0.001;
-      this._upsertCard(key, card, faceUp, x, y, z, 0);
+      const x = -1.65 + i * 1.08;
+      const z = -1.35;
+      const y = 0.035 + i * 0.001;
+      const rot = (i - (dealer.length - 1) / 2) * 0.04;
+
+      this._upsertCard({ key, card, faceUp, x, y, z, rotY: rot, w: cardW, h: cardH, animateOnNew: changed });
     });
 
-    // Active hand (Phase 1)
+    // Active player hand
     const activeIdx = hands.findIndex(h => h.isActive);
     const active = hands[activeIdx >= 0 ? activeIdx : 0];
     if (active?.cards) {
       active.cards.forEach((card, i) => {
         const key = `P${i}`;
         needed.add(key);
-        const x = -1.55 + i * 1.02;
-        const z = 1.10;
-        const y = 0.03 + i * 0.001;
-        const rot = (i - (active.cards.length - 1) / 2) * 0.05;
-        this._upsertCard(key, card, true, x, y, z, rot);
+
+        const x = -1.65 + i * 1.08;
+        const z = 1.22;
+        const y = 0.035 + i * 0.001;
+        const rot = (i - (active.cards.length - 1) / 2) * 0.06;
+
+        this._upsertCard({ key, card, faceUp: true, x, y, z, rotY: rot, w: cardW, h: cardH, animateOnNew: changed });
       });
     }
+
+    // Hole-card reveal flip (if it just transitioned hidden->shown)
+    const holeHidden = !!s.dealer?.holeHidden;
+    if (this._lastHoleHidden && !holeHidden) {
+      const holeKey = "D1";
+      const mesh = this._cards.get(holeKey);
+      const holeCard = dealer[1];
+      if (mesh && holeCard) {
+        // If the card is currently the back, flip it
+        const fromRot = mesh.rotation.clone();
+        const toRot = mesh.rotation.clone();
+        toRot.y = fromRot.y + Math.PI;
+
+        this._anims.set(holeKey, {
+          type: "flip",
+          t0: performance.now(),
+          dur: 520,
+          fromRot,
+          toRot,
+          // swap to faceUp at halfway
+          swapAtHalf: { card: holeCard, faceUp: true }
+        });
+      }
+    }
+    this._lastHoleHidden = holeHidden;
 
     // Remove unused
     for (const key of Array.from(this._cards.keys())) {
@@ -250,35 +412,53 @@ export class ThreeTable {
         mesh.material?.dispose?.();
         mesh.geometry?.dispose?.();
         this._cards.delete(key);
+        this._anims.delete(key);
       }
     }
   }
 
-  _upsertCard(key, card, faceUp, x, y, z, rotY) {
+  _upsertCard({ key, card, faceUp, x, y, z, rotY, w, h, animateOnNew }) {
     let mesh = this._cards.get(key);
-    const w = 0.92;
-    const h = w * (356 / 256);
+
+    const targetPos = new THREE.Vector3(x, y, z);
 
     if (!mesh) {
       const geo = new THREE.PlaneGeometry(w, h);
       const mat = makeCardMaterial(card, faceUp);
       mesh = new THREE.Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.y = rotY;
+      mesh.position.copy(this._shoePos); // start at shoe
       this.scene.add(mesh);
       this._cards.set(key, mesh);
       mesh.userData = { rank: card.rank, suit: card.suit, faceUp };
-    } else {
-      const ud = mesh.userData || {};
-      const changed = ud.rank !== card.rank || ud.suit !== card.suit || ud.faceUp !== faceUp;
-      if (changed) {
+
+      // Deal-in animation
+      this._anims.set(key, {
+        type: "deal",
+        t0: performance.now(),
+        dur: 260,
+        fromPos: this._shoePos.clone(),
+        toPos: targetPos.clone()
+      });
+      return;
+    }
+
+    // Update texture if rank/suit/face changed (unless we are mid-flip and will swap)
+    const ud = mesh.userData || {};
+    const changed = ud.rank !== card.rank || ud.suit !== card.suit || ud.faceUp !== faceUp;
+    if (changed) {
+      // If this is the dealer hole and we are still hidden, keep it back.
+      if (!(key === "D1" && ud.faceUp === false && faceUp === true)) {
         if (mesh.material?.map) mesh.material.map.dispose();
         mesh.material?.dispose?.();
         mesh.material = makeCardMaterial(card, faceUp);
-        mesh.userData = { rank: card.rank, suit: card.suit, faceUp };
       }
+      mesh.userData = { rank: card.rank, suit: card.suit, faceUp };
     }
 
-    mesh.position.set(x, y, z);
+    // If card already exists, set target pos (no animation yet for reflows)
+    mesh.position.copy(targetPos);
     mesh.rotation.y = rotY;
   }
 }
