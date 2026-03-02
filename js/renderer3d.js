@@ -105,12 +105,12 @@ function makeCardTexture({ rank, suit, faceUp }) {
 
 function makeCardMaterial(card, faceUp) {
   const tex = makeCardTexture({ rank: card.rank, suit: card.suit, faceUp });
-  const mat = new THREE.MeshStandardMaterial({
+    const mat = new THREE.MeshStandardMaterial({
     map: tex,
     roughness: 0.92,
     metalness: 0.0,
-    side: THREE.DoubleSide
-  });
+    side: THREE.FrontSide
+    });
   return mat;
 }
 
