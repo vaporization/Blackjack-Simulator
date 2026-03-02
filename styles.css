@@ -495,9 +495,8 @@ body.view-3d .table-grid{
 }
 
 body.view-3d .threeStage{
-  height: 100%;
-  min-height: 560px;           /* bump this if you want it even taller */
-  align-self: stretch;
+  height: clamp(380px, 46vh, 560px); /* responsive, but capped */
+  min-height: 420px;                /* keep it usable */
 }
 
 body.view-3d .threeStage canvas{

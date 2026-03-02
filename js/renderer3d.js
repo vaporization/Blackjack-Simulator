@@ -6,6 +6,7 @@
 // - Supports dealer row + ACTIVE player hand (splits later)
 
 import * as THREE from "https://unpkg.com/three@0.161.0/build/three.module.js";
+import { OrbitControls } from "https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js";
 
 const SUIT_COLOR = { "♥": "#b91c1c", "♦": "#b91c1c", "♣": "#0b1220", "♠": "#0b1220" };
 
@@ -167,7 +168,7 @@ export class ThreeTable {
     this._lastHoleHidden = true;
 
     // layout
-    this._shoePos = new THREE.Vector3(2.4, 0.05, 1.55); // where cards "come from"
+    this._shoePos = new THREE.Vector3(2.6, 0.05, 1.75); // where cards "come from"
   }
 
   init(container) {
@@ -178,14 +179,26 @@ export class ThreeTable {
     const w = container.clientWidth || 800;
     const h = container.clientHeight || 520;
 
-    this.camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 80);
-    // Slightly higher and closer for readability
-    this.camera.position.set(0, 3.1, 4.65);
-    this.camera.lookAt(0, 0, 0.25);
-
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    this.camera = new THREE.PerspectiveCamera(55, w / h, 0.1, 120);
+    // Framed to show dealer + player areas at typical desktop sizes
+    this.camera.position.set(0, 4.2, 6.8);
+    this.camera.lookAt(0, 0, 0);
+this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(w, h);
+
+    // Orbit controls (pan/zoom/orbit)
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    this.controls.minDistance = 3.2;
+    this.controls.maxDistance = 14.0;
+    this.controls.maxPolarAngle = Math.PI * 0.48; // keep above table
+    this.controls.target.set(0, 0, 0);
+    this.controls.update();
+
     this.renderer.setClearColor(0x000000, 0);
 
     // Clear, non-washed color
@@ -252,6 +265,19 @@ export class ThreeTable {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+
+    // Orbit controls (pan/zoom/orbit)
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    this.controls.minDistance = 3.2;
+    this.controls.maxDistance = 14.0;
+    this.controls.maxPolarAngle = Math.PI * 0.48; // keep above table
+    this.controls.target.set(0, 0, 0);
+    this.controls.update();
+
   }
 
   destroy() {
@@ -354,7 +380,7 @@ export class ThreeTable {
       const faceUp = !(isHole && s.dealer?.holeHidden);
 
       const x = -1.65 + i * 1.08;
-      const z = -1.35;
+      const z = -1.55;
       const y = 0.035 + i * 0.001;
       const rot = (i - (dealer.length - 1) / 2) * 0.04;
 
@@ -370,7 +396,7 @@ export class ThreeTable {
         needed.add(key);
 
         const x = -1.65 + i * 1.08;
-        const z = 1.22;
+        const z = 1.45;
         const y = 0.035 + i * 0.001;
         const rot = (i - (active.cards.length - 1) / 2) * 0.06;
 
